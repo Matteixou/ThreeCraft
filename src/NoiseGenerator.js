@@ -1,6 +1,5 @@
 import { createNoise2D } from 'simplex-noise';
 
-// PRNG déterministe (Mulberry32) pour un seed reproductible
 function mulberry32(seed) {
   return () => {
     seed = (seed + 0x6D2B79F5) | 0;
@@ -12,16 +11,28 @@ function mulberry32(seed) {
 
 export class NoiseGenerator {
   constructor(seed = 42) {
-    const rng = mulberry32(seed);
-    this.noise2D = createNoise2D(rng);
+    // 3 instances indépendantes pour terrain, température et humidité
+    this.noise2D  = createNoise2D(mulberry32(seed));
+    this.noiseT   = createNoise2D(mulberry32(seed + 1));
+    this.noiseH   = createNoise2D(mulberry32(seed + 2));
   }
 
-  // Retourne une hauteur normalisée [0, 1] via FBM (3 octaves)
-  getHeight(x, z) {
+  // FBM terrain, freq optionnel pour varier la forme par biome
+  getHeight(x, z, freq = 1.0) {
     let h = 0;
-    h += this.noise2D(x * 0.004, z * 0.004) * 0.55; // grandes collines
-    h += this.noise2D(x * 0.018, z * 0.018) * 0.30; // détails moyens
-    h += this.noise2D(x * 0.07,  z * 0.07)  * 0.15; // micro-relief
-    return (h + 1) / 2; // normalise [-1,1] → [0,1]
+    h += this.noise2D(x * 0.004 * freq, z * 0.004 * freq) * 0.55;
+    h += this.noise2D(x * 0.018 * freq, z * 0.018 * freq) * 0.30;
+    h += this.noise2D(x * 0.07  * freq, z * 0.07  * freq) * 0.15;
+    return (h + 1) / 2; // [0, 1]
+  }
+
+  // Température : varie lentement → détermine chaud/froid
+  getTemperature(x, z) {
+    return (this.noiseT(x * 0.0006, z * 0.0006) + 1) / 2;
+  }
+
+  // Humidité : varie lentement → détermine sec/humide
+  getHumidity(x, z) {
+    return (this.noiseH(x * 0.0006, z * 0.0006) + 1) / 2;
   }
 }

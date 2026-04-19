@@ -9,6 +9,8 @@ export const BlockType = {
   TALL_GRASS:  7,
   FLOWER_RED:  8,
   FLOWER_YEL:  9,
+  SNOW:        10,
+  CACTUS:      11,
 };
 
 // Couleur RGB hex par type de bloc
@@ -22,6 +24,8 @@ export const BlockColor = {
   [BlockType.TALL_GRASS]: 0x4ec840,
   [BlockType.FLOWER_RED]: 0xcc2222,
   [BlockType.FLOWER_YEL]: 0xf0d020,
+  [BlockType.SNOW]:       0xeef4ff,
+  [BlockType.CACTUS]:     0x2d7a1f,
 };
 
 export const BlockName = {
@@ -35,6 +39,8 @@ export const BlockName = {
   [BlockType.TALL_GRASS]:  'TALL GRASS',
   [BlockType.FLOWER_RED]:  'FLOWER',
   [BlockType.FLOWER_YEL]:  'FLOWER',
+  [BlockType.SNOW]:        'SNOW',
+  [BlockType.CACTUS]:      'CACTUS',
 };
 
 // Blocs que le joueur peut poser (sans AIR ni décors)
