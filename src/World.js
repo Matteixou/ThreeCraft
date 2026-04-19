@@ -135,13 +135,44 @@ export class World {
       }
     }
 
-    // Passe 2 : décors
+    // Passe 2 : minerais
+    this._generateOres(chunk);
+
+    // Passe 3 : décors
     this._generateDecorations(chunk);
 
-    // Passe 3 : structures (villages, châteaux, ruines, chambres secrètes)
+    // Passe 4 : structures (villages, châteaux, ruines, chambres secrètes)
     this._applyStructures(chunk);
 
     chunk.isDirty = true;
+  }
+
+  _generateOres(chunk) {
+    for (let z = 0; z < CHUNK_SIZE; z++) {
+      for (let x = 0; x < CHUNK_SIZE; x++) {
+        const wx = chunk.chunkX * CHUNK_SIZE + x;
+        const wz = chunk.chunkZ * CHUNK_SIZE + z;
+        // Surface height to avoid placing ores above terrain
+        let surfY = 0;
+        for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
+          if (chunk.getVoxel(x, y, z) !== BlockType.AIR) { surfY = y; break; }
+        }
+        for (let y = 1; y < Math.min(surfY - 1, 50); y++) {
+          if (chunk.getVoxel(x, y, z) !== BlockType.STONE) continue;
+          const r = hash(wx * 7 + y * 3, wz * 11 + y * 7);
+          // COAL: y 4-48, freq ~1/30
+          if (y <= 48 && r < 0.033) { chunk.setVoxel(x, y, z, BlockType.COAL_ORE); continue; }
+          // IRON: y 4-40, freq ~1/60
+          if (y <= 40 && r < 0.050 && r >= 0.033) { chunk.setVoxel(x, y, z, BlockType.IRON_ORE); continue; }
+          // GOLD: y 4-20, freq ~1/200
+          if (y <= 20 && r < 0.055 && r >= 0.050) { chunk.setVoxel(x, y, z, BlockType.GOLD_ORE); continue; }
+          // DIAMOND: y 1-12, freq ~1/500
+          if (y <= 12 && r < 0.0572 && r >= 0.055) { chunk.setVoxel(x, y, z, BlockType.DIAMOND_ORE); continue; }
+          // GRAVEL patches deep
+          if (y <= 20 && hash(wx * 13 + y, wz * 9 + y) < 0.018) chunk.setVoxel(x, y, z, BlockType.GRAVEL);
+        }
+      }
+    }
   }
 
   _generateDecorations(chunk) {
@@ -322,7 +353,7 @@ export class World {
   }
 
   update(playerPos) {
-    const RENDER_DIST = 5;
+    const RENDER_DIST = 4;
     const pcx = Math.floor(playerPos.x / CHUNK_SIZE);
     const pcz = Math.floor(playerPos.z / CHUNK_SIZE);
 
@@ -335,6 +366,7 @@ export class World {
 
     // Limiter la génération à 2 nouveaux chunks par frame (évite les freezes)
     let newThisFrame = 0;
+    let rebuiltThisFrame = 0;
     for (const { cx, cz } of needed) {
       const key = this._key(cx, cz);
       if (!this.chunks.has(key)) {
@@ -344,7 +376,12 @@ export class World {
         this._generateChunk(chunk);
         this.chunks.set(key, chunk);
       }
-      this.chunks.get(key).buildMesh(this.scene);
+      const chunk = this.chunks.get(key);
+      if (chunk.isDirty) {
+        if (rebuiltThisFrame >= 2) continue;
+        rebuiltThisFrame++;
+      }
+      chunk.buildMesh(this.scene);
     }
 
     // Décharger les chunks hors portée (ne pas disposer le matériau — il est partagé !)

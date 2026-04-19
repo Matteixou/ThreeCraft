@@ -1,5 +1,5 @@
 import { BlockType } from './Voxel.js';
-const { AIR, DIRT, STONE, WOOD, PLANKS, LEAVES } = BlockType;
+const { AIR, DIRT, STONE, WOOD, PLANKS, LEAVES, COBBLESTONE } = BlockType;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -144,7 +144,7 @@ export function placeRuin(chunk, cx, cz, surfY, seed) {
   // Sol partiellement présent
   for (let x = x0; x <= x0+W-1; x++)
     for (let z = z0; z <= z0+L-1; z++)
-      if (hash(seed+x*3, z*7) > 0.35) set(chunk, x, surfY, z, STONE);
+      if (hash(seed+x*3, z*7) > 0.35) set(chunk, x, surfY, z, COBBLESTONE);
 
   // Murs abîmés (hauteur aléatoire, trous aléatoires)
   for (let x = x0; x <= x0+W-1; x++) {
@@ -153,7 +153,7 @@ export function placeRuin(chunk, cx, cz, surfY, seed) {
       if (!onEdge) continue;
       const maxH = Math.floor(1 + hash(seed + x*11, z*17) * 5);
       for (let y = surfY+1; y <= surfY+maxH; y++) {
-        if (hash(x*5+y*3, z*9+seed*2) > 0.22) set(chunk, x, y, z, STONE);
+        if (hash(x*5+y*3, z*9+seed*2) > 0.22) set(chunk, x, y, z, COBBLESTONE);
       }
     }
   }
@@ -177,10 +177,10 @@ export function placeCastle(chunk, cx, cz, surfY, seed) {
   // Murs périmètre
   for (let y = surfY+1; y <= surfY+WH; y++) {
     for (let i = 0; i < OUTER; i++) {
-      set(chunk, x0+i,        y, z0,           STONE);
-      set(chunk, x0+i,        y, z0+OUTER-1,   STONE);
-      set(chunk, x0,          y, z0+i,          STONE);
-      set(chunk, x0+OUTER-1,  y, z0+i,          STONE);
+      set(chunk, x0+i,        y, z0,           COBBLESTONE);
+      set(chunk, x0+i,        y, z0+OUTER-1,   COBBLESTONE);
+      set(chunk, x0,          y, z0+i,          COBBLESTONE);
+      set(chunk, x0+OUTER-1,  y, z0+i,          COBBLESTONE);
     }
   }
 
