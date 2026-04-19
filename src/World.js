@@ -1,6 +1,8 @@
+import * as THREE from 'three';
 import { Chunk, CHUNK_SIZE, CHUNK_HEIGHT } from './Chunk.js';
 import { BlockType } from './Voxel.js';
 import { NoiseGenerator } from './NoiseGenerator.js';
+import { createTextureAtlas } from './TextureAtlas.js';
 
 // Paramètres de terrain par biome
 const BIOME_DATA = {
@@ -24,6 +26,14 @@ export class World {
     this.scene  = scene;
     this.chunks = new Map();
     this.noise  = new NoiseGenerator(seed);
+
+    // Atlas de textures partagé entre tous les chunks
+    this.atlas    = createTextureAtlas();
+    this.solidMat = new THREE.MeshLambertMaterial({ map: this.atlas, vertexColors: true });
+    this.crossMat = new THREE.MeshLambertMaterial({
+      map: this.atlas, vertexColors: true,
+      side: THREE.DoubleSide, alphaTest: 0.1,
+    });
   }
 
   _key(cx, cz) { return `${cx},${cz}`; }
