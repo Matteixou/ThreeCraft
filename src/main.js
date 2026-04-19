@@ -283,15 +283,8 @@ function updateArm(dt) {
     if (armSwingT >= 1) { armSwingT = 0; armSwinging = false; }
   }
   const swing = armSwinging ? Math.sin(armSwingT * Math.PI) : 0;
-  const moving = input.isKeyDown('KeyW') || input.isKeyDown('KeyS') ||
-                 input.isKeyDown('KeyA') || input.isKeyDown('KeyD');
-  const t    = Date.now() * 0.007;
-  const bob  = moving && player.onGround ? Math.sin(t)       * 0.022 : 0;
-  const sway = moving && player.onGround ? Math.sin(t * 0.5) * 0.014 : 0;
 
-  // Position de repos + bob de marche
-  armGroup.position.set(0.43 + sway, -0.60 + bob, -0.80);
-  // Swing : rotation vers l'avant + légère torsion
+  armGroup.position.set(0.43, -0.60, -0.80);
   armPivot.rotation.x = -swing * 0.85;
   armPivot.rotation.z =  swing * 0.22;
 }
