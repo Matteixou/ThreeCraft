@@ -418,6 +418,13 @@ document.addEventListener('keydown', e => {
     else if (input.isLocked) openInventory();
   }
   if (e.code === 'Escape' && inventoryOpen) closeInventory();
+
+  // Touches &é"'(-è_ç → slots hotbar 1-9 (Digit1..Digit9)
+  const digitMatch = e.code.match(/^Digit([1-9])$/);
+  if (digitMatch && !inventoryOpen) {
+    inventory.selected = parseInt(digitMatch[1]) - 1;
+    updateHUD();
+  }
 });
 
 // ── Hotbar canvas ─────────────────────────────────────────────────────────────
