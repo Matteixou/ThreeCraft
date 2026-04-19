@@ -2,8 +2,16 @@ import { Chunk, CHUNK_SIZE, CHUNK_HEIGHT } from './Chunk.js';
 import { BlockType } from './Voxel.js';
 import { NoiseGenerator } from './NoiseGenerator.js';
 
-const SEA_LEVEL  = 12; // y minimum du terrain
-const MAX_HEIGHT = 38; // amplitude max en blocs
+const SEA_LEVEL  = 12;
+const MAX_HEIGHT = 38;
+
+// Hash déterministe (x,z) → [0,1] pour la génération procédurale des décors
+function hash(x, z) {
+  let n = (x * 374761393 + z * 1073741789) | 0;
+  n = (n ^ (n >>> 13)) >>> 0;
+  n = (n * 1274126177) >>> 0;
+  return n / 0xFFFFFFFF;
+}
 
 export class World {
   constructor(scene, seed = 42) {
@@ -29,6 +37,7 @@ export class World {
   }
 
   _generateChunk(chunk) {
+    // Passe 1 : terrain
     for (let z = 0; z < CHUNK_SIZE; z++) {
       for (let x = 0; x < CHUNK_SIZE; x++) {
         const wx = chunk.chunkX * CHUNK_SIZE + x;
@@ -37,14 +46,74 @@ export class World {
 
         for (let y = 0; y <= h && y < CHUNK_HEIGHT; y++) {
           let type;
-          if      (y === h)     type = BlockType.GRASS;
-          else if (y >= h - 3)  type = BlockType.DIRT;
-          else                  type = BlockType.STONE;
+          if      (y === h)    type = BlockType.GRASS;
+          else if (y >= h - 3) type = BlockType.DIRT;
+          else                 type = BlockType.STONE;
           chunk.setVoxel(x, y, z, type);
         }
       }
     }
+    // Passe 2 : décors (après que tout le terrain est en place)
+    this._generateDecorations(chunk);
     chunk.isDirty = true;
+  }
+
+  _generateDecorations(chunk) {
+    for (let z = 0; z < CHUNK_SIZE; z++) {
+      for (let x = 0; x < CHUNK_SIZE; x++) {
+        // Trouver la surface (bloc herbe le plus haut)
+        let surfaceY = -1;
+        for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
+          if (chunk.getVoxel(x, y, z) === BlockType.GRASS) { surfaceY = y; break; }
+        }
+        if (surfaceY < 0 || surfaceY + 1 >= CHUNK_HEIGHT) continue;
+
+        const wx = chunk.chunkX * CHUNK_SIZE + x;
+        const wz = chunk.chunkZ * CHUNK_SIZE + z;
+        const r  = hash(wx, wz);
+
+        if (r < 0.004 && x >= 2 && x < CHUNK_SIZE - 2 && z >= 2 && z < CHUNK_SIZE - 2) {
+          // Arbre (uniquement loin des bords pour garder les feuilles dans le chunk)
+          this._placeTree(chunk, x, surfaceY + 1, z);
+        } else if (r < 0.13) {
+          chunk.setVoxel(x, surfaceY + 1, z, BlockType.TALL_GRASS);
+        } else if (r < 0.15) {
+          chunk.setVoxel(x, surfaceY + 1, z, BlockType.FLOWER_RED);
+        } else if (r < 0.17) {
+          chunk.setVoxel(x, surfaceY + 1, z, BlockType.FLOWER_YEL);
+        }
+      }
+    }
+  }
+
+  _placeTree(chunk, x, baseY, z) {
+    const wx    = chunk.chunkX * CHUNK_SIZE + x;
+    const wz    = chunk.chunkZ * CHUNK_SIZE + z;
+    const trunkH = 4 + (hash(wx + 7, wz + 3) > 0.5 ? 1 : 0); // 4 ou 5 blocs
+
+    // Tronc
+    for (let i = 0; i < trunkH && baseY + i < CHUNK_HEIGHT; i++) {
+      chunk.setVoxel(x, baseY + i, z, BlockType.WOOD);
+    }
+
+    // Feuilles : cercle décroissant depuis le sommet
+    const topY    = baseY + trunkH;
+    const levels  = [[0, 2], [1, 2], [2, 1], [3, 0]]; // [dy, rayon]
+
+    for (const [dy, radius] of levels) {
+      const ly = topY + dy;
+      if (ly < 0 || ly >= CHUNK_HEIGHT) continue;
+      for (let lx = -radius; lx <= radius; lx++) {
+        for (let lz = -radius; lz <= radius; lz++) {
+          if (lx * lx + lz * lz > radius * radius + radius) continue; // cercle arrondi
+          const nx = x + lx, nz = z + lz;
+          if (nx < 0 || nx >= CHUNK_SIZE || nz < 0 || nz >= CHUNK_SIZE) continue;
+          if (chunk.getVoxel(nx, ly, nz) === BlockType.AIR) {
+            chunk.setVoxel(nx, ly, nz, BlockType.LEAVES);
+          }
+        }
+      }
+    }
   }
 
   // Lecture en coordonnées monde (cross-chunk safe)
