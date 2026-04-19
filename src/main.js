@@ -196,6 +196,53 @@ function takeCraftOutput() {
   computeCraft();
 }
 
+// ── Bras première personne ────────────────────────────────────────────────────
+const armScene  = new THREE.Scene();
+const armCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 10);
+armScene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const armLight = new THREE.DirectionalLight(0xffffff, 1.1);
+armLight.position.set(1, 3, 2);
+armScene.add(armLight);
+
+const armPivot = new THREE.Group(); // pivot pour l'animation de swing
+armScene.add(armPivot);
+
+const armGroup = new THREE.Group();
+armGroup.position.set(0.38, -0.52, -0.75);
+armPivot.add(armGroup);
+
+const _aM = c => new THREE.MeshLambertMaterial({ color: c });
+// Manche (chemise)
+const armSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.28, 0.16), _aM(0x2255bb));
+armSleeve.position.set(0, 0.10, 0);
+armGroup.add(armSleeve);
+// Avant-bras (peau)
+const armForearm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.22, 0.14), _aM(0xffcc99));
+armForearm.position.set(0, -0.13, 0);
+armGroup.add(armForearm);
+// Main / poing
+const armHand = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.15, 0.12), _aM(0xffcc99));
+armHand.position.set(0, -0.30, 0.02);
+armGroup.add(armHand);
+
+let armSwingT    = 0;
+let armSwinging  = false;
+
+function triggerArmSwing() { armSwingT = 0; armSwinging = true; }
+
+function updateArm(dt) {
+  if (armSwinging) {
+    armSwingT += dt * 7;
+    if (armSwingT >= 1) { armSwingT = 0; armSwinging = false; }
+  }
+  const swing = armSwinging ? Math.sin(armSwingT * Math.PI) * 0.9 : 0;
+  const moving = input.isKeyDown('KeyW') || input.isKeyDown('KeyS') ||
+                 input.isKeyDown('KeyA') || input.isKeyDown('KeyD');
+  const bob = moving && player.onGround ? Math.sin(Date.now() * 0.008) * 0.02 : 0;
+  armGroup.position.set(0.38, -0.52 + bob, -0.75);
+  armPivot.rotation.x = -swing;
+}
+
 // ── Inventaire UI ─────────────────────────────────────────────────────────────
 let inventoryOpen = false;
 let invMouseX = 0, invMouseY = 0;
@@ -643,6 +690,7 @@ function loop(now) {
         if (broken !== BlockType.AIR) inventory.add(broken);
         rebuildAround(hit.x, hit.z);
         interactCooldown = 0.15;
+        triggerArmSwing();
         updateHUD();
       } else if (input.consumeMouseButton(2)) {
         if (sel && isFood(sel.type)) {
@@ -650,6 +698,7 @@ function loop(now) {
           player.eat(FOOD_DATA[sel.type].restore);
           inventory.consume(inventory.selected, 1);
           interactCooldown = 0.15;
+          triggerArmSwing();
           updateHUD();
         } else if (sel && isBlock(sel.type)) {
           // Poser un bloc
@@ -661,12 +710,14 @@ function loop(now) {
             inventory.consume(inventory.selected, 1);
             rebuildAround(px, pz);
             interactCooldown = 0.15;
+            triggerArmSwing();
             updateHUD();
           }
         }
       }
     }
 
+    updateArm(dt);
     // Update bars chaque frame (santé/faim peuvent changer)
     drawBars();
 
@@ -686,6 +737,13 @@ function loop(now) {
   }
 
   renderer.render(scene, camera);
+
+  if (!inventoryOpen && input.isLocked) {
+    renderer.autoClear = false;
+    renderer.clearDepth();
+    renderer.render(armScene, armCamera);
+    renderer.autoClear = true;
+  }
 }
 
 requestAnimationFrame(loop);
@@ -711,5 +769,7 @@ function collidesWithPlayer(bx, by, bz) {
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  armCamera.aspect = window.innerWidth / window.innerHeight;
+  armCamera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
