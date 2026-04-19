@@ -5,6 +5,7 @@ import { InputHandler } from './InputHandler.js';
 import { PLACEABLE_BLOCKS, BlockName, BlockType } from './Voxel.js';
 import { CHUNK_SIZE } from './Chunk.js';
 import { getBlockTile } from './TextureAtlas.js';
+import { CloudSystem } from './Clouds.js';
 
 // ── Renderer ──────────────────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -86,6 +87,7 @@ scene.add(selectionBox);
 const input  = new InputHandler();
 const world  = new World(scene, 42);
 const player = new Player(camera, world, input);
+const clouds = new CloudSystem(scene);
 
 // ── Spawn au sol ──────────────────────────────────────────────────────────────
 world.update(player.position);
@@ -236,6 +238,7 @@ function loop(now) {
 
     player.update(dt);
     world.update(player.position);
+    clouds.update(player.position.x, player.position.z, dt);
     updateDayNight(dt);
 
     interactCooldown -= dt;
