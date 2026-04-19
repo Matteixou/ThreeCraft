@@ -24,6 +24,7 @@ export const TileId = {
   FLOWER_YEL_T: 14,
   APPLE_T:      15,
   BREAD_T:      16,
+  PLANKS_T:     17,
 };
 
 // UV rect [u0, v0, u1, v1] for a tile (Three.js: Y=0 at bottom)
@@ -52,6 +53,7 @@ export function getBlockTile(blockType, faceIdx) {
     case BlockType.TALL_GRASS:  return TileId.TALL_GRASS_T;
     case BlockType.FLOWER_RED:  return TileId.FLOWER_RED_T;
     case BlockType.FLOWER_YEL:  return TileId.FLOWER_YEL_T;
+    case BlockType.PLANKS: return TileId.PLANKS_T;
     case 100: return TileId.APPLE_T;
     case 101: return TileId.BREAD_T;
     default: return TileId.DIRT;
@@ -281,14 +283,26 @@ function drawBread(d) {
   }
 }
 
-// Ordre exact correspondant à TileId (0 → 16)
+// Planches : grain horizontal avec séparation de lames
+function drawPlanks(d) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const v  = rnd(x, y, 22);
+    const v2 = rnd(x + 100, y, 22);
+    const seam  = y % 8 === 0 ? -30 : 0;
+    const grain = (Math.sin(x * 0.9 + v * 0.8) * 0.5 + 0.5) * 12;
+    const knot  = rnd(x + 30, y + 30, 22) > 0.96 ? -22 : 0;
+    px(d, x, y, K(162+v*26+grain+seam+knot), K(102+v*18+grain+seam+knot), K(48+v*12+seam+knot));
+  }
+}
+
+// Ordre exact correspondant à TileId (0 → 17)
 const DRAWERS = [
   drawGrassTop, drawGrassSide, drawDirt, drawStone, drawSand,
   drawWoodSide, drawWoodTop, drawLeaves,
   drawSnowTop, drawSnowSide,
   drawCactusSide, drawCactusTop,
   drawTallGrass, drawFlowerRed, drawFlowerYel,
-  drawApple, drawBread,
+  drawApple, drawBread, drawPlanks,
 ];
 
 // ── Export : création de l'atlas ──────────────────────────────────────────────

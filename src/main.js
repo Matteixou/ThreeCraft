@@ -117,47 +117,144 @@ overlay.addEventListener('click', () => {
   if (!inventoryOpen) renderer.domElement.requestPointerLock();
 });
 
+// ── Personnage 3D (mini-renderer offscreen) ───────────────────────────────────
+const charOffscreen = document.createElement('canvas');
+charOffscreen.width  = 130;
+charOffscreen.height = 190;
+const charRenderer = new THREE.WebGLRenderer({ canvas: charOffscreen, alpha: true, antialias: true });
+charRenderer.setSize(130, 190);
+charRenderer.setClearColor(0x000000, 0);
+
+const charScene = new THREE.Scene();
+charScene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const charSun = new THREE.DirectionalLight(0xffffff, 1.4);
+charSun.position.set(2, 4, 3);
+charScene.add(charSun);
+
+const charCam = new THREE.PerspectiveCamera(42, 130 / 190, 0.1, 50);
+charCam.position.set(0, 1.6, 5);
+charCam.lookAt(0, 1.5, 0);
+
+const charGroup = new THREE.Group();
+const _mkM = c => new THREE.MeshLambertMaterial({ color: c });
+const _mkP = (w, h, d, color, x, y, z) => {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), _mkM(color));
+  m.position.set(x, y, z); return m;
+};
+charGroup.add(
+  _mkP(0.80, 0.80, 0.80, 0xffcc99,  0,     2.70,  0),    // tête
+  _mkP(0.85, 0.28, 0.85, 0x3d1f0a,  0,     3.04,  0),    // cheveux
+  _mkP(0.15, 0.30, 0.20, 0xffcc99,  0,     2.30, -0.35), // nez
+  _mkP(0.90, 1.20, 0.50, 0x2255bb,  0,     1.70,  0),    // corps
+  _mkP(0.40, 1.10, 0.40, 0x2255bb, -0.65,  1.75,  0),    // bras gauche
+  _mkP(0.40, 1.10, 0.40, 0x2255bb,  0.65,  1.75,  0),    // bras droit
+  _mkP(0.42, 1.10, 0.42, 0x334466, -0.23,  0.60,  0),    // jambe gauche
+  _mkP(0.42, 1.10, 0.42, 0x334466,  0.23,  0.60,  0),    // jambe droite
+  _mkP(0.46, 0.28, 0.52, 0x221100, -0.23,  0.04,  0.04), // pied gauche
+  _mkP(0.46, 0.28, 0.52, 0x221100,  0.23,  0.04,  0.04), // pied droit
+);
+charScene.add(charGroup);
+
+// ── Craft ─────────────────────────────────────────────────────────────────────
+const craftSlots = new Array(4).fill(null); // 2×2
+let craftOutput  = null;
+
+const RECIPES = [
+  { inputs: [5, 5, 5, 5], output: { type: 12, count: 4 } }, // 4 WOOD → 4 PLANKS
+  { inputs: [12,12,12,12], output: { type: 5,  count: 1 } }, // 4 PLANKS → 1 WOOD
+];
+
+function computeCraft() {
+  for (const r of RECIPES) {
+    if (r.inputs.every((t, i) => craftSlots[i]?.type === t)) {
+      craftOutput = { ...r.output }; return;
+    }
+  }
+  craftOutput = null;
+}
+
+function handleCraftSlotClick(idx) {
+  if (inventory.held) {
+    if (!craftSlots[idx]) {
+      craftSlots[idx] = inventory.held; inventory.held = null;
+    } else if (craftSlots[idx].type === inventory.held.type && craftSlots[idx].count < 64) {
+      craftSlots[idx].count++; inventory.held.count--;
+      if (!inventory.held.count) inventory.held = null;
+    } else { [craftSlots[idx], inventory.held] = [inventory.held, craftSlots[idx]]; }
+  } else if (craftSlots[idx]) {
+    inventory.held = craftSlots[idx]; craftSlots[idx] = null;
+  }
+}
+
+function takeCraftOutput() {
+  if (!craftOutput) return;
+  inventory.add(craftOutput.type, craftOutput.count);
+  updateHUD();
+  for (let i = 0; i < 4; i++) {
+    if (craftSlots[i]) { craftSlots[i].count--; if (!craftSlots[i].count) craftSlots[i] = null; }
+  }
+  computeCraft();
+}
+
 // ── Inventaire UI ─────────────────────────────────────────────────────────────
 let inventoryOpen = false;
 let invMouseX = 0, invMouseY = 0;
 
-const invOverlay  = document.getElementById('inv-overlay');
-const invCanvas   = document.getElementById('inv-canvas');
-const invCtx      = invCanvas.getContext('2d');
+const invOverlay = document.getElementById('inv-overlay');
+const invCanvas  = document.getElementById('inv-canvas');
+const invCtx     = invCanvas.getContext('2d');
 
-const SLOT_PX   = 50;
-const SLOT_GAP  = 4;
-const SLOT_STR  = SLOT_PX + SLOT_GAP;
-const INV_PAD   = 16;
-const TITLE_H   = 36;
-const SEP_H     = 20;
-const GRID_H    = GRID_ROWS * SLOT_STR;   // 3 * 54 = 162
-const HOTBAR_H  = SLOT_PX;
+// Layout constants
+const INV_PAD  = 16;
+const SLOT_PX  = 50;
+const SLOT_GAP = 4;
+const SLOT_STR = SLOT_PX + SLOT_GAP; // 54
+const CHAR_W   = 130;                 // width of character preview
+// Y zones
+const TITLE_H  = 44;
+const TOP_H    = 194;  // character+craft area height
+const TOP_Y    = TITLE_H;
+const GRID_Y   = TOP_Y + TOP_H + 6;
+const SEP_Y    = GRID_Y + GRID_ROWS * SLOT_STR;
+const HBAR_Y   = SEP_Y + 14;
+// Craft grid position (centered in right zone)
+const CRAFT_X  = INV_PAD + CHAR_W + 24;  // left of craft 2×2
+const CRAFT_Y  = TOP_Y + 24;
+const ARROW_X  = CRAFT_X + 2 * SLOT_STR + 6;
+const OUT_X    = ARROW_X + 28;
+const OUT_Y    = CRAFT_Y + (SLOT_STR - SLOT_PX) / 2; // vertically centered with craft
 
-invCanvas.width  = INV_PAD * 2 + HOTBAR_SIZE * SLOT_STR - SLOT_GAP;
-invCanvas.height = INV_PAD * 2 + TITLE_H + GRID_H + SEP_H + HOTBAR_H;
+invCanvas.width  = INV_PAD * 2 + HOTBAR_SIZE * SLOT_STR - SLOT_GAP; // 514
+invCanvas.height = HBAR_Y + SLOT_PX + INV_PAD;
 
-function slotXY(col, rowType) {
-  // rowType: 0-2 = grid row, 'h' = hotbar
-  const x = INV_PAD + col * SLOT_STR;
-  const y = rowType === 'h'
-    ? INV_PAD + TITLE_H + GRID_H + SEP_H
-    : INV_PAD + TITLE_H + rowType * SLOT_STR;
-  return [x, y];
-}
-
-function getUiSlotAt(mx, my) {
-  for (let col = 0; col < HOTBAR_SIZE; col++) {
-    for (let row = 0; row < GRID_ROWS; row++) {
-      const [x, y] = slotXY(col, row);
-      if (mx >= x && mx < x + SLOT_PX && my >= y && my < y + SLOT_PX)
-        return row * HOTBAR_SIZE + col; // 0-26
-    }
-    const [hx, hy] = slotXY(col, 'h');
-    if (mx >= hx && mx < hx + SLOT_PX && my >= hy && my < hy + SLOT_PX)
-      return GRID_ROWS * HOTBAR_SIZE + col; // 27-35
+// Returns { kind, ... } for the element under (mx, my)
+function getClickTarget(mx, my) {
+  // Craft 2×2
+  for (let ci = 0; ci < 4; ci++) {
+    const cx = CRAFT_X + (ci % 2) * SLOT_STR;
+    const cy = CRAFT_Y + Math.floor(ci / 2) * SLOT_STR;
+    if (mx >= cx && mx < cx + SLOT_PX && my >= cy && my < cy + SLOT_PX)
+      return { kind: 'craft', idx: ci };
   }
-  return -1;
+  // Craft output
+  if (mx >= OUT_X && mx < OUT_X + SLOT_PX && my >= OUT_Y && my < OUT_Y + SLOT_PX)
+    return { kind: 'craftout' };
+  // Grid rows (inventory slots 9-35, uiIdx 0-26)
+  for (let row = 0; row < GRID_ROWS; row++) {
+    for (let col = 0; col < HOTBAR_SIZE; col++) {
+      const x = INV_PAD + col * SLOT_STR;
+      const y = GRID_Y + row * SLOT_STR;
+      if (mx >= x && mx < x + SLOT_PX && my >= y && my < y + SLOT_PX)
+        return { kind: 'inv', uiIdx: row * HOTBAR_SIZE + col };
+    }
+  }
+  // Hotbar (uiIdx 27-35)
+  for (let col = 0; col < HOTBAR_SIZE; col++) {
+    const x = INV_PAD + col * SLOT_STR;
+    if (mx >= x && mx < x + SLOT_PX && my >= HBAR_Y && my < HBAR_Y + SLOT_PX)
+      return { kind: 'inv', uiIdx: GRID_ROWS * HOTBAR_SIZE + col };
+  }
+  return null;
 }
 
 function drawInvSlot(ctx, x, y, item, highlighted, held) {
@@ -198,33 +295,64 @@ function drawInventoryUI() {
   invCtx.textAlign = 'center';
   invCtx.fillText('INVENTAIRE', W / 2, INV_PAD + 20);
 
-  // Grid rows (slots 9-35 in inventory, displayed as rows 0-2)
+  // ── Character preview (left of top zone) ──────────────────────────────────
+  const charFrameX = INV_PAD;
+  const charFrameY = TOP_Y + 4;
+  invCtx.strokeStyle = '#555';
+  invCtx.lineWidth = 1;
+  invCtx.strokeRect(charFrameX, charFrameY, CHAR_W, TOP_H - 8);
+  invCtx.imageSmoothingEnabled = false;
+  invCtx.drawImage(charOffscreen, charFrameX + 1, charFrameY + 1, CHAR_W - 2, TOP_H - 10);
+
+  // ── Craft grid label ───────────────────────────────────────────────────────
+  invCtx.fillStyle = '#ccc';
+  invCtx.font = '11px monospace';
+  invCtx.textAlign = 'left';
+  invCtx.fillText('CRAFT', CRAFT_X, TOP_Y + 14);
+
+  // ── Craft 2×2 slots ────────────────────────────────────────────────────────
+  for (let ci = 0; ci < 4; ci++) {
+    const cx = CRAFT_X + (ci % 2) * SLOT_STR;
+    const cy = CRAFT_Y + Math.floor(ci / 2) * SLOT_STR;
+    drawInvSlot(invCtx, cx, cy, craftSlots[ci], false, false);
+  }
+
+  // ── Arrow → ───────────────────────────────────────────────────────────────
+  invCtx.fillStyle = '#aaa';
+  invCtx.font = 'bold 20px monospace';
+  invCtx.textAlign = 'center';
+  invCtx.fillText('→', ARROW_X + 14, CRAFT_Y + SLOT_STR - 4);
+
+  // ── Craft output slot ──────────────────────────────────────────────────────
+  drawInvSlot(invCtx, OUT_X, OUT_Y, craftOutput, false, false);
+
+  // ── Separator ──────────────────────────────────────────────────────────────
+  invCtx.strokeStyle = '#666';
+  invCtx.lineWidth = 1;
+  invCtx.beginPath();
+  invCtx.moveTo(INV_PAD, SEP_Y + 7);
+  invCtx.lineTo(W - INV_PAD, SEP_Y + 7);
+  invCtx.stroke();
+
+  // ── Grid rows (slots 9-35, uiIdx 0-26) ────────────────────────────────────
   for (let row = 0; row < GRID_ROWS; row++) {
     for (let col = 0; col < HOTBAR_SIZE; col++) {
-      const [x, y] = slotXY(col, row);
-      const invIdx = HOTBAR_SIZE + row * HOTBAR_SIZE + col; // slots[9..35]
+      const x = INV_PAD + col * SLOT_STR;
+      const y = GRID_Y + row * SLOT_STR;
+      const invIdx = HOTBAR_SIZE + row * HOTBAR_SIZE + col;
       drawInvSlot(invCtx, x, y, inventory.slots[invIdx], false, false);
     }
   }
 
-  // Separator
-  invCtx.strokeStyle = '#888';
-  invCtx.lineWidth = 1;
-  const sepY = INV_PAD + TITLE_H + GRID_H + SEP_H / 2;
-  invCtx.beginPath();
-  invCtx.moveTo(INV_PAD, sepY);
-  invCtx.lineTo(W - INV_PAD, sepY);
-  invCtx.stroke();
-
-  // Hotbar (slots 0-8)
+  // ── Hotbar (slots 0-8) ────────────────────────────────────────────────────
   for (let col = 0; col < HOTBAR_SIZE; col++) {
-    const [x, y] = slotXY(col, 'h');
-    drawInvSlot(invCtx, x, y, inventory.slots[col], col === inventory.selected, false);
+    const x = INV_PAD + col * SLOT_STR;
+    drawInvSlot(invCtx, x, HBAR_Y, inventory.slots[col], col === inventory.selected, false);
   }
 
-  // Held item follows cursor
+  // ── Held item follows cursor ───────────────────────────────────────────────
   if (inventory.held) {
-    drawInvSlot(invCtx, invMouseX - SLOT_PX/2, invMouseY - SLOT_PX/2, inventory.held, false, true);
+    drawInvSlot(invCtx, invMouseX - SLOT_PX / 2, invMouseY - SLOT_PX / 2, inventory.held, false, true);
   }
 }
 
@@ -236,11 +364,15 @@ invCanvas.addEventListener('mousemove', e => {
 });
 
 invCanvas.addEventListener('click', e => {
-  const r    = invCanvas.getBoundingClientRect();
-  const mx   = e.clientX - r.left;
-  const my   = e.clientY - r.top;
-  const ui   = getUiSlotAt(mx, my);
-  if (ui !== -1) { inventory.clickSlot(ui); drawInventoryUI(); }
+  const r  = invCanvas.getBoundingClientRect();
+  const mx = e.clientX - r.left;
+  const my = e.clientY - r.top;
+  const t  = getClickTarget(mx, my);
+  if (!t) return;
+  if      (t.kind === 'craft')    { handleCraftSlotClick(t.idx); computeCraft(); }
+  else if (t.kind === 'craftout') { takeCraftOutput(); }
+  else if (t.kind === 'inv')      { inventory.clickSlot(t.uiIdx); }
+  drawInventoryUI();
 });
 
 invCanvas.addEventListener('contextmenu', e => {
@@ -248,8 +380,12 @@ invCanvas.addEventListener('contextmenu', e => {
   const r  = invCanvas.getBoundingClientRect();
   const mx = e.clientX - r.left;
   const my = e.clientY - r.top;
-  const ui = getUiSlotAt(mx, my);
-  if (ui !== -1) { inventory.rightClickSlot(ui); drawInventoryUI(); }
+  const t  = getClickTarget(mx, my);
+  if (!t) return;
+  if      (t.kind === 'craft')    { handleCraftSlotClick(t.idx); computeCraft(); }
+  else if (t.kind === 'craftout') { takeCraftOutput(); }
+  else if (t.kind === 'inv')      { inventory.rightClickSlot(t.uiIdx); }
+  drawInventoryUI();
 });
 
 invOverlay.addEventListener('click', e => {
@@ -266,6 +402,11 @@ function openInventory() {
 
 function closeInventory() {
   inventory.dropHeld();
+  // Return craft items to inventory
+  for (let i = 0; i < 4; i++) {
+    if (craftSlots[i]) { inventory.add(craftSlots[i].type, craftSlots[i].count); craftSlots[i] = null; }
+  }
+  craftOutput = null;
   inventoryOpen = false;
   invOverlay.style.display = 'none';
   renderer.domElement.requestPointerLock();
@@ -529,6 +670,12 @@ function loop(now) {
     debugEl.textContent = `pos: ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}  |  ${String(hh).padStart(2,'0')}h${String(mm).padStart(2,'0')}`;
   } else if (!inventoryOpen) {
     overlay.style.display = 'flex';
+  }
+
+  if (inventoryOpen) {
+    charGroup.rotation.y += dt * 0.8;
+    charRenderer.render(charScene, charCam);
+    drawInventoryUI();
   }
 
   renderer.render(scene, camera);

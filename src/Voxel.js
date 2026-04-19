@@ -11,6 +11,7 @@ export const BlockType = {
   FLOWER_YEL:  9,
   SNOW:        10,
   CACTUS:      11,
+  PLANKS:      12,
 };
 
 // Couleur RGB hex par type de bloc
@@ -41,6 +42,7 @@ export const BlockName = {
   [BlockType.FLOWER_YEL]:  'FLOWER',
   [BlockType.SNOW]:        'SNOW',
   [BlockType.CACTUS]:      'CACTUS',
+  [BlockType.PLANKS]:      'Planches',
   [100]:                   'Pomme',
   [101]:                   'Pain',
 };
