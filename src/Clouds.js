@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 
-const CLOUD_Y = 54;   // altitude des nuages
-const CLOUD_H = 2;    // épaisseur (blocs)
-const CELL    = 12;   // largeur d'une cellule de nuage (unités monde)
-const HALF    = 28;   // grille de (HALF*2+1)² cellules autour du joueur
+const CLOUD_Y = 62;   // altitude des nuages
+const CLOUD_H = 5;    // épaisseur (blocs)
+const CELL    = 14;   // largeur d'une cellule de nuage (unités monde)
+const HALF    = 26;   // grille de (HALF*2+1)² cellules autour du joueur
 const WIND    = 2.0;  // vitesse du vent (unités/sec)
 
 // Hash déterministe → [0, 1]
@@ -15,12 +15,16 @@ function hash(x, z) {
 
 // Présence d'un bloc nuage en cellule (gx, gz)
 function cloudAt(gx, gz) {
-  // Macro-cellule 3×3 : détermine les grandes masses nuageuses
-  const mx = Math.floor(gx / 3);
-  const mz = Math.floor(gz / 3);
-  if (hash(mx * 7, mz * 13) < 0.44) return false;
-  // Fine : perfore les masses pour éviter un plafond uniforme
-  return hash(gx, gz) > 0.18;
+  // Macro-cellule 5×5 : grandes masses bien formées
+  const mx = Math.floor(gx / 5);
+  const mz = Math.floor(gz / 5);
+  if (hash(mx * 7, mz * 13) < 0.48) return false;
+  // Niveau intermédiaire 2×2 : arrondit les bords des masses
+  const ix = Math.floor(gx / 2);
+  const iz = Math.floor(gz / 2);
+  if (hash(ix * 3 + 50, iz * 3 + 50) < 0.28) return false;
+  // Fine : perfore légèrement l'intérieur
+  return hash(gx + 200, gz + 200) > 0.15;
 }
 
 export class CloudSystem {
@@ -32,9 +36,10 @@ export class CloudSystem {
 
     const geo = new THREE.BoxGeometry(CELL, CLOUD_H, CELL);
     this.mat  = new THREE.MeshLambertMaterial({
-      color: 0xfefeff,
+      color: 0xf8faff,
       transparent: true,
-      opacity: 0.92,
+      opacity: 0.68,
+      depthWrite: false,
     });
 
     const maxCount = (HALF * 2 + 1) ** 2;
