@@ -199,48 +199,85 @@ function takeCraftOutput() {
 // ── Bras première personne ────────────────────────────────────────────────────
 const armScene  = new THREE.Scene();
 const armCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 10);
-armScene.add(new THREE.AmbientLight(0xffffff, 0.55));
-const armLight = new THREE.DirectionalLight(0xffffff, 1.1);
-armLight.position.set(1, 3, 2);
-armScene.add(armLight);
+// Lumière principale (haut-droite) + fill gauche pour donner du volume
+armScene.add(new THREE.AmbientLight(0xffffff, 0.40));
+const armKeyLight  = new THREE.DirectionalLight(0xfff5e0, 1.3);
+armKeyLight.position.set(2, 4, 3);
+armScene.add(armKeyLight);
+const armFillLight = new THREE.DirectionalLight(0xaac4ff, 0.35);
+armFillLight.position.set(-3, 1, 2);
+armScene.add(armFillLight);
 
-const armPivot = new THREE.Group(); // pivot pour l'animation de swing
+const armPivot = new THREE.Group();
 armScene.add(armPivot);
 
+// Position de repos : coin bas-droit, incliné comme un vrai bras
 const armGroup = new THREE.Group();
-armGroup.position.set(0.38, -0.52, -0.75);
+armGroup.position.set(0.43, -0.60, -0.80);
+// Inclinaison naturelle : avant-bras penché vers l'avant et légèrement vers l'intérieur
+armGroup.rotation.set(0.28, 0.0, 0.18);
 armPivot.add(armGroup);
 
 const _aM = c => new THREE.MeshLambertMaterial({ color: c });
-// Manche (chemise)
-const armSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.28, 0.16), _aM(0x2255bb));
-armSleeve.position.set(0, 0.10, 0);
-armGroup.add(armSleeve);
-// Avant-bras (peau)
-const armForearm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.22, 0.14), _aM(0xffcc99));
-armForearm.position.set(0, -0.13, 0);
-armGroup.add(armForearm);
-// Main / poing
-const armHand = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.15, 0.12), _aM(0xffcc99));
-armHand.position.set(0, -0.30, 0.02);
-armGroup.add(armHand);
 
-let armSwingT    = 0;
-let armSwinging  = false;
+// ① Haut du bras – manche (chemise bleue)
+const seg_sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.30, 0.18), _aM(0x1e4fa8));
+seg_sleeve.position.set(0, 0.18, 0);
+armGroup.add(seg_sleeve);
+
+// ② Revers de manche (bande plus sombre à la coupure)
+const seg_cuff = new THREE.Mesh(new THREE.BoxGeometry(0.185, 0.055, 0.185), _aM(0x153880));
+seg_cuff.position.set(0, 0.015, 0);
+armGroup.add(seg_cuff);
+
+// ③ Avant-bras (peau) – légèrement plus fin
+const seg_forearm = new THREE.Mesh(new THREE.BoxGeometry(0.155, 0.22, 0.155), _aM(0xffbf80));
+seg_forearm.position.set(0, -0.145, 0);
+armGroup.add(seg_forearm);
+
+// ④ Poignet – transition légèrement aplatie
+const seg_wrist = new THREE.Mesh(new THREE.BoxGeometry(0.185, 0.065, 0.135), _aM(0xffbf80));
+seg_wrist.position.set(0, -0.29, 0.01);
+armGroup.add(seg_wrist);
+
+// ⑤ Paume
+const seg_palm = new THREE.Mesh(new THREE.BoxGeometry(0.215, 0.175, 0.115), _aM(0xffbf80));
+seg_palm.position.set(0, -0.395, 0.015);
+armGroup.add(seg_palm);
+
+// ⑥ Phalange des doigts (petite bande sombre sous la paume)
+const seg_knuckle = new THREE.Mesh(new THREE.BoxGeometry(0.215, 0.045, 0.115), _aM(0xe8a860));
+seg_knuckle.position.set(0, -0.495, 0.015);
+armGroup.add(seg_knuckle);
+
+// ⑦ Pouce (incliné sur le côté)
+const seg_thumb = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.120, 0.090), _aM(0xffbf80));
+seg_thumb.position.set(-0.148, -0.375, 0.012);
+seg_thumb.rotation.z = 0.38;
+armGroup.add(seg_thumb);
+
+let armSwingT   = 0;
+let armSwinging = false;
 
 function triggerArmSwing() { armSwingT = 0; armSwinging = true; }
 
 function updateArm(dt) {
   if (armSwinging) {
-    armSwingT += dt * 7;
+    armSwingT += dt * 7.5;
     if (armSwingT >= 1) { armSwingT = 0; armSwinging = false; }
   }
-  const swing = armSwinging ? Math.sin(armSwingT * Math.PI) * 0.9 : 0;
+  const swing = armSwinging ? Math.sin(armSwingT * Math.PI) : 0;
   const moving = input.isKeyDown('KeyW') || input.isKeyDown('KeyS') ||
                  input.isKeyDown('KeyA') || input.isKeyDown('KeyD');
-  const bob = moving && player.onGround ? Math.sin(Date.now() * 0.008) * 0.02 : 0;
-  armGroup.position.set(0.38, -0.52 + bob, -0.75);
-  armPivot.rotation.x = -swing;
+  const t    = Date.now() * 0.007;
+  const bob  = moving && player.onGround ? Math.sin(t)       * 0.022 : 0;
+  const sway = moving && player.onGround ? Math.sin(t * 0.5) * 0.014 : 0;
+
+  // Position de repos + bob de marche
+  armGroup.position.set(0.43 + sway, -0.60 + bob, -0.80);
+  // Swing : rotation vers l'avant + légère torsion
+  armPivot.rotation.x = -swing * 0.85;
+  armPivot.rotation.z =  swing * 0.22;
 }
 
 // ── Inventaire UI ─────────────────────────────────────────────────────────────
