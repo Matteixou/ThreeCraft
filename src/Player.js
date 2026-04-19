@@ -30,6 +30,9 @@ export class Player {
     this._hungerTimer = 0;
     this._starveTimer = 0;
     this._regenTimer  = 0;
+    this._damagedAt   = -9999;
+    this._bobTime     = 0;
+    this._bobY        = 0;
   }
 
   update(dt) {
@@ -37,7 +40,15 @@ export class Player {
     this._look();
     this._move(dt);
     this._physics(dt);
+    this._updateBob(dt);
     this._syncCamera();
+  }
+
+  _updateBob(dt) {
+    const moving = (Math.abs(this.velocity.x) > 0.2 || Math.abs(this.velocity.z) > 0.2) && this.onGround;
+    if (moving) this._bobTime += dt * 7.5;
+    const target = moving ? Math.sin(this._bobTime) * 0.032 : 0;
+    this._bobY += (target - this._bobY) * Math.min(1, dt * 10);
   }
 
   _look() {
@@ -169,12 +180,13 @@ export class Player {
   _syncCamera() {
     this.camera.position.set(
       this.position.x,
-      this.position.y + EYE_OFFSET,
+      this.position.y + EYE_OFFSET + this._bobY,
       this.position.z
     );
     this.camera.rotation.order = 'YXZ';
-    this.camera.rotation.y     = this.yaw;
-    this.camera.rotation.x     = this.pitch;
+    this.camera.rotation.y = this.yaw;
+    this.camera.rotation.x = this.pitch;
+    this.camera.rotation.z = this._bobY * 1.2; // léger roulis lors du bob
   }
 
   getCameraDirection() {
@@ -185,6 +197,7 @@ export class Player {
 
   takeDamage(n) {
     this.health = Math.max(0, this.health - n);
+    this._damagedAt = performance.now();
     if (this.health === 0) this._die();
   }
 

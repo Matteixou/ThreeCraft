@@ -9,6 +9,7 @@
     body { background: #000; overflow: hidden; font-family: monospace; }
     canvas { display: block; }
 
+    /* ── Overlay pause ────────────────────────────────────────────────────── */
     #overlay {
       position: fixed; inset: 0;
       background: rgba(0,0,0,0.75);
@@ -19,31 +20,60 @@
     #overlay h1 { font-size: 56px; letter-spacing: 4px; margin-bottom: 12px; }
     #overlay p  { font-size: 18px; opacity: 0.7; }
 
+    /* ── Réticule Minecraft (croix avec gap au centre) ────────────────────── */
     #crosshair {
       position: fixed; top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      color: #fff; font-size: 28px; line-height: 1;
-      pointer-events: none; -webkit-user-select: none; user-select: none;
-      text-shadow: 0 0 4px #000;
+      pointer-events: none; user-select: none;
+      width: 0; height: 0;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute;
+      background: rgba(255,255,255,0.90);
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.50);
+    }
+    /* barre horizontale */
+    #crosshair::before {
+      width: 20px; height: 2px;
+      left: -10px; top: -1px;
+    }
+    /* barre verticale */
+    #crosshair::after {
+      width: 2px; height: 20px;
+      left: -1px; top: -10px;
     }
 
-    /* Barres santé/faim au-dessus de la hotbar */
+    /* ── Vignette permanente (coins sombres) ──────────────────────────────── */
+    #vignette {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at 50% 50%,
+        transparent 55%, rgba(0,0,0,0.52) 100%);
+      pointer-events: none; z-index: 4;
+    }
+
+    /* ── Flash rouge sur dégâts ───────────────────────────────────────────── */
+    #damage-flash {
+      position: fixed; inset: 0;
+      background: rgba(200,0,0,0);
+      pointer-events: none; z-index: 5;
+      opacity: 0;
+    }
+
+    /* ── Barres santé / faim ──────────────────────────────────────────────── */
     #bars {
       position: fixed; bottom: 82px; left: 50%;
       transform: translateX(-50%);
-      image-rendering: pixelated;
-      pointer-events: none;
+      image-rendering: pixelated; pointer-events: none;
     }
 
-    /* Hotbar */
+    /* ── Hotbar ───────────────────────────────────────────────────────────── */
     #hotbar {
       position: fixed; bottom: 16px; left: 50%;
       transform: translateX(-50%);
-      image-rendering: pixelated;
-      pointer-events: none;
+      image-rendering: pixelated; pointer-events: none;
     }
 
-    /* Nom du bloc sélectionné */
+    /* ── Nom du bloc sélectionné ──────────────────────────────────────────── */
     #hud {
       position: fixed; bottom: 76px; right: calc(50% - 240px);
       background: rgba(0,0,0,0.55);
@@ -52,7 +82,7 @@
       pointer-events: none;
     }
 
-    /* Debug */
+    /* ── Debug ────────────────────────────────────────────────────────────── */
     #debug {
       position: fixed; top: 10px; left: 10px;
       background: rgba(0,0,0,0.5);
@@ -61,30 +91,23 @@
       pointer-events: none;
     }
 
-    /* Minimap */
+    /* ── Minimap ──────────────────────────────────────────────────────────── */
     #minimap {
       position: fixed; top: 10px; right: 10px;
       border-radius: 50%;
       border: 2px solid rgba(255,255,255,0.40);
       box-shadow: 0 0 14px rgba(0,0,0,0.75);
-      image-rendering: pixelated;
-      pointer-events: none;
+      image-rendering: pixelated; pointer-events: none;
     }
 
-    /* Overlay inventaire */
+    /* ── Overlay inventaire ───────────────────────────────────────────────── */
     #inv-overlay {
-      display: none;
-      position: fixed; inset: 0;
+      display: none; position: fixed; inset: 0;
       background: rgba(0,0,0,0.55);
       align-items: center; justify-content: center;
       z-index: 20;
     }
-
-    #inv-canvas {
-      image-rendering: pixelated;
-      border-radius: 6px;
-      cursor: default;
-    }
+    #inv-canvas { image-rendering: pixelated; border-radius: 6px; cursor: default; }
   </style>
 </head>
 <body>
@@ -93,20 +116,27 @@
     <canvas id="menu-canvas" style="display:block;"></canvas>
   </div>
 
-  <!-- Reprendre après perte du pointer lock -->
+  <!-- Pause / reprendre -->
   <div id="overlay" style="display:none;">
     <h1>ThreeCraft</h1>
     <p>Cliquez pour reprendre</p>
   </div>
-  <div id="crosshair">+</div>
+
+  <!-- HUD éléments -->
+  <div id="vignette"></div>
+  <div id="damage-flash"></div>
+  <div id="crosshair"></div>
   <canvas id="bars"></canvas>
   <canvas id="hotbar"></canvas>
   <div id="hud">—</div>
   <div id="debug">pos: 0 0 0</div>
   <canvas id="minimap"></canvas>
+
+  <!-- Inventaire -->
   <div id="inv-overlay">
     <canvas id="inv-canvas"></canvas>
   </div>
+
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

@@ -225,22 +225,36 @@ export class World {
     const pcx = Math.floor(playerPos.x / CHUNK_SIZE);
     const pcz = Math.floor(playerPos.z / CHUNK_SIZE);
 
-    for (let dz = -RENDER_DIST; dz <= RENDER_DIST; dz++) {
-      for (let dx = -RENDER_DIST; dx <= RENDER_DIST; dx++) {
-        const chunk = this.getOrCreateChunk(pcx + dx, pcz + dz);
-        chunk.buildMesh(this.scene);
+    // Trier les chunks nécessaires du plus proche au plus loin
+    const needed = [];
+    for (let dz = -RENDER_DIST; dz <= RENDER_DIST; dz++)
+      for (let dx = -RENDER_DIST; dx <= RENDER_DIST; dx++)
+        needed.push({ cx: pcx + dx, cz: pcz + dz, d2: dx * dx + dz * dz });
+    needed.sort((a, b) => a.d2 - b.d2);
+
+    // Limiter la génération à 2 nouveaux chunks par frame (évite les freezes)
+    let newThisFrame = 0;
+    for (const { cx, cz } of needed) {
+      const key = this._key(cx, cz);
+      if (!this.chunks.has(key)) {
+        if (newThisFrame >= 2) continue;
+        newThisFrame++;
+        const chunk = new Chunk(cx, cz, this);
+        this._generateChunk(chunk);
+        this.chunks.set(key, chunk);
       }
+      this.chunks.get(key).buildMesh(this.scene);
     }
 
+    // Décharger les chunks hors portée (ne pas disposer le matériau — il est partagé !)
     for (const [key, chunk] of this.chunks) {
       const [cx, cz] = key.split(',').map(Number);
       if (Math.abs(cx - pcx) > RENDER_DIST + 1 || Math.abs(cz - pcz) > RENDER_DIST + 1) {
-        for (const key of ['mesh', 'meshCross']) {
-          if (chunk[key]) {
-            this.scene.remove(chunk[key]);
-            chunk[key].geometry.dispose();
-            chunk[key].material.dispose();
-            chunk[key] = null;
+        for (const mk of ['mesh', 'meshCross']) {
+          if (chunk[mk]) {
+            this.scene.remove(chunk[mk]);
+            chunk[mk].geometry.dispose();
+            chunk[mk] = null;
           }
         }
         this.chunks.delete(key);

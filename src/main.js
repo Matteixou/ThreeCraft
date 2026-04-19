@@ -680,43 +680,61 @@ function _rebuildMinimapTiles() {
   mmOffCtx.putImageData(img, 0, 0);
 }
 
+// ── Flash de dégâts ───────────────────────────────────────────────────────────
+const damageFlashEl = document.getElementById('damage-flash');
+
+function updateDamageFlash() {
+  const age   = (performance.now() - player._damagedAt) / 1000;
+  const alpha = Math.max(0, 0.45 - age * 1.8);
+  damageFlashEl.style.background = `rgba(200,0,0,${alpha})`;
+}
+
 function drawMinimap() {
   _rebuildMinimapTiles();
-
   minimapCtx.clearRect(0, 0, MM_SIZE, MM_SIZE);
 
-  // Clip circulaire
+  // ── Contenu clipé en cercle ──────────────────────────────────────────────
   minimapCtx.save();
   minimapCtx.beginPath();
   minimapCtx.arc(MM_SIZE / 2, MM_SIZE / 2, MM_SIZE / 2, 0, Math.PI * 2);
   minimapCtx.clip();
   minimapCtx.drawImage(mmOff, 0, 0);
 
-  // Flèche joueur (triangle pointant dans la direction de visée)
+  // Flèche joueur
   const cx = MM_SIZE / 2, cy = MM_SIZE / 2;
-  const fx = -Math.sin(player.yaw);
-  const fz = -Math.cos(player.yaw);
-  const tip = 11, wing = 5;
-
+  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   minimapCtx.beginPath();
-  minimapCtx.moveTo(cx + fx * tip,       cy + fz * tip);
-  minimapCtx.lineTo(cx + (-fz) * wing,   cy + fx * wing);
-  minimapCtx.lineTo(cx - (-fz) * wing,   cy - fx * wing);
+  minimapCtx.moveTo(cx + fx * 11,    cy + fz * 11);
+  minimapCtx.lineTo(cx + (-fz) * 5,  cy + fx * 5);
+  minimapCtx.lineTo(cx - (-fz) * 5,  cy - fx * 5);
   minimapCtx.closePath();
-  minimapCtx.fillStyle   = '#ffffff';
-  minimapCtx.fill();
-  minimapCtx.strokeStyle = '#000';
-  minimapCtx.lineWidth   = 1;
-  minimapCtx.stroke();
-
+  minimapCtx.fillStyle = '#fff'; minimapCtx.fill();
+  minimapCtx.strokeStyle = '#000'; minimapCtx.lineWidth = 1; minimapCtx.stroke();
   minimapCtx.restore();
 
-  // Bordure circulaire
+  // ── Bordure ───────────────────────────────────────────────────────────────
   minimapCtx.beginPath();
   minimapCtx.arc(MM_SIZE / 2, MM_SIZE / 2, MM_SIZE / 2 - 1, 0, Math.PI * 2);
   minimapCtx.strokeStyle = 'rgba(255,255,255,0.45)';
-  minimapCtx.lineWidth   = 2;
-  minimapCtx.stroke();
+  minimapCtx.lineWidth = 2; minimapCtx.stroke();
+
+  // ── Boussole N/S/E/W ──────────────────────────────────────────────────────
+  const R = MM_SIZE / 2 + 11;
+  const dirs = [
+    { label: 'N', ax: 0,  az: -1 },
+    { label: 'S', ax: 0,  az:  1 },
+    { label: 'E', ax: 1,  az:  0 },
+    { label: 'O', ax: -1, az:  0 },
+  ];
+  minimapCtx.font = 'bold 10px monospace';
+  minimapCtx.textAlign = 'center';
+  minimapCtx.textBaseline = 'middle';
+  for (const { label, ax, az } of dirs) {
+    const lx = MM_SIZE / 2 + ax * R, ly = MM_SIZE / 2 + az * R;
+    minimapCtx.fillStyle = label === 'N' ? '#ff4444' : '#ffffff';
+    minimapCtx.fillText(label, lx, ly);
+  }
+  minimapCtx.textBaseline = 'alphabetic';
 }
 
 // ── HUD ───────────────────────────────────────────────────────────────────────
@@ -866,6 +884,7 @@ function loop(now) {
 
     updateArm(dt);
     drawMinimap();
+    updateDamageFlash();
     // Update bars chaque frame (santé/faim peuvent changer)
     drawBars();
 
