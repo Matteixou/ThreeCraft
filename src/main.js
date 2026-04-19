@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { World } from './World.js';
 import { Player } from './Player.js';
 import { InputHandler } from './InputHandler.js';
-import { PLACEABLE_BLOCKS, BlockName, BlockType } from './Voxel.js';
+import { BlockType, BlockName, isBlock, isFood, FOOD_DATA } from './Voxel.js';
 import { CHUNK_SIZE } from './Chunk.js';
 import { getBlockTile } from './TextureAtlas.js';
 import { CloudSystem } from './Clouds.js';
+import { Inventory, HOTBAR_SIZE, GRID_ROWS } from './Inventory.js';
 
 // ── Renderer ──────────────────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -49,7 +50,6 @@ const sunDisc = new THREE.Mesh(
 );
 scene.add(sunDisc);
 
-// ── Disque lune ───────────────────────────────────────────────────────────────
 const moonDisc = new THREE.Mesh(
   new THREE.CircleGeometry(8, 24),
   new THREE.MeshBasicMaterial({ color: 0xd8e8ff, fog: false }),
@@ -84,10 +84,21 @@ selectionBox.visible = false;
 scene.add(selectionBox);
 
 // ── Systèmes ──────────────────────────────────────────────────────────────────
-const input  = new InputHandler();
-const world  = new World(scene, 42);
-const player = new Player(camera, world, input);
-const clouds = new CloudSystem(scene);
+const input     = new InputHandler();
+const world     = new World(scene, 42);
+const player    = new Player(camera, world, input);
+const clouds    = new CloudSystem(scene);
+const inventory = new Inventory();
+
+// Inventaire de départ
+inventory.slots[0] = { type: BlockType.GRASS,  count: 32 };
+inventory.slots[1] = { type: BlockType.DIRT,   count: 32 };
+inventory.slots[2] = { type: BlockType.STONE,  count: 32 };
+inventory.slots[3] = { type: BlockType.SAND,   count: 16 };
+inventory.slots[4] = { type: BlockType.WOOD,   count: 16 };
+inventory.slots[5] = { type: BlockType.LEAVES, count: 16 };
+inventory.slots[6] = { type: 100, count: 5 }; // APPLE
+inventory.slots[7] = { type: 101, count: 3 }; // BREAD
 
 // ── Spawn au sol ──────────────────────────────────────────────────────────────
 world.update(player.position);
@@ -102,55 +113,284 @@ for (let y = 63; y >= 0; y--) {
 
 // ── Pointer lock ──────────────────────────────────────────────────────────────
 const overlay = document.getElementById('overlay');
-overlay.addEventListener('click', () => renderer.domElement.requestPointerLock());
+overlay.addEventListener('click', () => {
+  if (!inventoryOpen) renderer.domElement.requestPointerLock();
+});
 
-// ── Hotbar ────────────────────────────────────────────────────────────────────
+// ── Inventaire UI ─────────────────────────────────────────────────────────────
+let inventoryOpen = false;
+let invMouseX = 0, invMouseY = 0;
+
+const invOverlay  = document.getElementById('inv-overlay');
+const invCanvas   = document.getElementById('inv-canvas');
+const invCtx      = invCanvas.getContext('2d');
+
+const SLOT_PX   = 50;
+const SLOT_GAP  = 4;
+const SLOT_STR  = SLOT_PX + SLOT_GAP;
+const INV_PAD   = 16;
+const TITLE_H   = 36;
+const SEP_H     = 20;
+const GRID_H    = GRID_ROWS * SLOT_STR;   // 3 * 54 = 162
+const HOTBAR_H  = SLOT_PX;
+
+invCanvas.width  = INV_PAD * 2 + HOTBAR_SIZE * SLOT_STR - SLOT_GAP;
+invCanvas.height = INV_PAD * 2 + TITLE_H + GRID_H + SEP_H + HOTBAR_H;
+
+function slotXY(col, rowType) {
+  // rowType: 0-2 = grid row, 'h' = hotbar
+  const x = INV_PAD + col * SLOT_STR;
+  const y = rowType === 'h'
+    ? INV_PAD + TITLE_H + GRID_H + SEP_H
+    : INV_PAD + TITLE_H + rowType * SLOT_STR;
+  return [x, y];
+}
+
+function getUiSlotAt(mx, my) {
+  for (let col = 0; col < HOTBAR_SIZE; col++) {
+    for (let row = 0; row < GRID_ROWS; row++) {
+      const [x, y] = slotXY(col, row);
+      if (mx >= x && mx < x + SLOT_PX && my >= y && my < y + SLOT_PX)
+        return row * HOTBAR_SIZE + col; // 0-26
+    }
+    const [hx, hy] = slotXY(col, 'h');
+    if (mx >= hx && mx < hx + SLOT_PX && my >= hy && my < hy + SLOT_PX)
+      return GRID_ROWS * HOTBAR_SIZE + col; // 27-35
+  }
+  return -1;
+}
+
+function drawInvSlot(ctx, x, y, item, highlighted, held) {
+  ctx.fillStyle = highlighted ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.65)';
+  ctx.fillRect(x, y, SLOT_PX, SLOT_PX);
+  ctx.strokeStyle = highlighted ? '#fff' : '#555';
+  ctx.lineWidth   = highlighted ? 2 : 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, SLOT_PX - 1, SLOT_PX - 1);
+
+  if (item) {
+    const atlas = world.atlas.image;
+    const T = 16, COLS = 16;
+    const tileId = getBlockTile(item.type, 2);
+    const tc = tileId % COLS, tr = Math.floor(tileId / COLS);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(atlas, tc*T, tr*T, T, T, x+5, y+5, SLOT_PX-10, SLOT_PX-10);
+
+    if (item.count > 1) {
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(item.count, x + SLOT_PX - 3, y + SLOT_PX - 3);
+    }
+  }
+}
+
+function drawInventoryUI() {
+  const W = invCanvas.width, H = invCanvas.height;
+  invCtx.clearRect(0, 0, W, H);
+
+  // Panel background
+  invCtx.fillStyle = 'rgba(30,30,30,0.92)';
+  invCtx.fillRect(0, 0, W, H);
+
+  // Title
+  invCtx.fillStyle = '#fff';
+  invCtx.font = 'bold 16px monospace';
+  invCtx.textAlign = 'center';
+  invCtx.fillText('INVENTAIRE', W / 2, INV_PAD + 20);
+
+  // Grid rows (slots 9-35 in inventory, displayed as rows 0-2)
+  for (let row = 0; row < GRID_ROWS; row++) {
+    for (let col = 0; col < HOTBAR_SIZE; col++) {
+      const [x, y] = slotXY(col, row);
+      const invIdx = HOTBAR_SIZE + row * HOTBAR_SIZE + col; // slots[9..35]
+      drawInvSlot(invCtx, x, y, inventory.slots[invIdx], false, false);
+    }
+  }
+
+  // Separator
+  invCtx.strokeStyle = '#888';
+  invCtx.lineWidth = 1;
+  const sepY = INV_PAD + TITLE_H + GRID_H + SEP_H / 2;
+  invCtx.beginPath();
+  invCtx.moveTo(INV_PAD, sepY);
+  invCtx.lineTo(W - INV_PAD, sepY);
+  invCtx.stroke();
+
+  // Hotbar (slots 0-8)
+  for (let col = 0; col < HOTBAR_SIZE; col++) {
+    const [x, y] = slotXY(col, 'h');
+    drawInvSlot(invCtx, x, y, inventory.slots[col], col === inventory.selected, false);
+  }
+
+  // Held item follows cursor
+  if (inventory.held) {
+    drawInvSlot(invCtx, invMouseX - SLOT_PX/2, invMouseY - SLOT_PX/2, inventory.held, false, true);
+  }
+}
+
+invCanvas.addEventListener('mousemove', e => {
+  const r = invCanvas.getBoundingClientRect();
+  invMouseX = e.clientX - r.left;
+  invMouseY = e.clientY - r.top;
+  if (inventoryOpen) drawInventoryUI();
+});
+
+invCanvas.addEventListener('click', e => {
+  const r    = invCanvas.getBoundingClientRect();
+  const mx   = e.clientX - r.left;
+  const my   = e.clientY - r.top;
+  const ui   = getUiSlotAt(mx, my);
+  if (ui !== -1) { inventory.clickSlot(ui); drawInventoryUI(); }
+});
+
+invCanvas.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const r  = invCanvas.getBoundingClientRect();
+  const mx = e.clientX - r.left;
+  const my = e.clientY - r.top;
+  const ui = getUiSlotAt(mx, my);
+  if (ui !== -1) { inventory.rightClickSlot(ui); drawInventoryUI(); }
+});
+
+invOverlay.addEventListener('click', e => {
+  if (e.target === invOverlay) closeInventory();
+});
+
+function openInventory() {
+  inventoryOpen = true;
+  inventory.dropHeld();
+  invOverlay.style.display = 'flex';
+  drawInventoryUI();
+  document.exitPointerLock();
+}
+
+function closeInventory() {
+  inventory.dropHeld();
+  inventoryOpen = false;
+  invOverlay.style.display = 'none';
+  renderer.domElement.requestPointerLock();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.code === 'KeyE') {
+    if (inventoryOpen) closeInventory();
+    else if (input.isLocked) openInventory();
+  }
+  if (e.code === 'Escape' && inventoryOpen) closeInventory();
+});
+
+// ── Hotbar canvas ─────────────────────────────────────────────────────────────
 const hotbarCanvas = document.getElementById('hotbar');
 const hCtx         = hotbarCanvas.getContext('2d');
-const SLOT  = 52;
-const SLOTS = PLACEABLE_BLOCKS.length;
-hotbarCanvas.width  = SLOT * SLOTS + 4;
-hotbarCanvas.height = SLOT + 4;
+const HSLOT  = 52;
+hotbarCanvas.width  = HSLOT * HOTBAR_SIZE + 4;
+hotbarCanvas.height = HSLOT + 4;
 
 function drawHotbar() {
-  const atlas = world.atlas.image; // canvas from createTextureAtlas
+  const atlas = world.atlas.image;
   const T = 16, COLS = 16;
   hCtx.imageSmoothingEnabled = false;
   hCtx.clearRect(0, 0, hotbarCanvas.width, hotbarCanvas.height);
 
-  for (let i = 0; i < SLOTS; i++) {
-    const bx       = i * SLOT + 2;
-    const by       = 2;
-    const blockType = PLACEABLE_BLOCKS[i];
-    const sel       = i === selectedIdx;
+  for (let i = 0; i < HOTBAR_SIZE; i++) {
+    const bx   = i * HSLOT + 2;
+    const by   = 2;
+    const item = inventory.slots[i];
+    const sel  = i === inventory.selected;
 
     hCtx.fillStyle = sel ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.60)';
-    hCtx.fillRect(bx, by, SLOT, SLOT);
+    hCtx.fillRect(bx, by, HSLOT, HSLOT);
 
-    const tileId = getBlockTile(blockType, 2); // face +Y (top)
-    const col    = tileId % COLS;
-    const row    = Math.floor(tileId / COLS);
-    hCtx.drawImage(atlas, col * T, row * T, T, T, bx + 6, by + 6, SLOT - 12, SLOT - 12);
+    if (item) {
+      const tileId = getBlockTile(item.type, 2);
+      const tc = tileId % COLS, tr = Math.floor(tileId / COLS);
+      hCtx.drawImage(atlas, tc*T, tr*T, T, T, bx+6, by+6, HSLOT-12, HSLOT-12);
+      if (item.count > 1) {
+        hCtx.fillStyle = '#fff';
+        hCtx.font = 'bold 10px monospace';
+        hCtx.textAlign = 'right';
+        hCtx.fillText(item.count, bx + HSLOT - 4, by + HSLOT - 4);
+      }
+    }
 
     hCtx.strokeStyle = sel ? '#ffffff' : '#555555';
     hCtx.lineWidth   = sel ? 2.5 : 1;
-    hCtx.strokeRect(bx + 0.5, by + 0.5, SLOT - 1, SLOT - 1);
+    hCtx.strokeRect(bx + 0.5, by + 0.5, HSLOT - 1, HSLOT - 1);
   }
 }
 
-// ── Sélection de bloc ─────────────────────────────────────────────────────────
-let selectedIdx = 0;
+// ── Barres santé / faim ───────────────────────────────────────────────────────
+const barsCanvas = document.getElementById('bars');
+const bCtx       = barsCanvas.getContext('2d');
+const ICONS      = 10;
+const ICON_PX    = 3;  // scale of pixel grid
+const ICON_W     = 5 * ICON_PX;
+const ICON_GAP   = 3;
+const ICON_STR   = ICON_W + ICON_GAP;
+barsCanvas.width  = ICONS * ICON_STR - ICON_GAP + 2;
+barsCanvas.height = ICON_W * 2 + 6;
+
+const HEART_GRID = [
+  [0,1,0,1,0],
+  [1,1,1,1,1],
+  [1,1,1,1,1],
+  [0,1,1,1,0],
+  [0,0,1,0,0],
+];
+const FOOD_GRID = [
+  [0,0,1,1,0],
+  [0,1,1,1,1],
+  [1,1,1,1,0],
+  [0,1,1,0,0],
+  [0,0,1,0,0],
+];
+
+function drawPixelIcon(ctx, grid, x, y, color, dimColor) {
+  for (let py = 0; py < grid.length; py++) {
+    for (let px = 0; px < grid[py].length; px++) {
+      if (grid[py][px]) {
+        ctx.fillStyle = color;
+        ctx.fillRect(x + px * ICON_PX, y + py * ICON_PX, ICON_PX, ICON_PX);
+      }
+    }
+  }
+}
+
+function drawBars() {
+  bCtx.clearRect(0, 0, barsCanvas.width, barsCanvas.height);
+  const hp = player.health, mhp = player.maxHealth;
+  const hu = player.hunger, mhu = player.maxHunger;
+
+  for (let i = 0; i < ICONS; i++) {
+    const x = i * ICON_STR;
+    // Heart: each icon = 2 HP
+    const hpFull = hp >= (i + 1) * 2;
+    const hpHalf = !hpFull && hp >= i * 2 + 1;
+    const hColor = hpFull ? '#e0342f' : hpHalf ? '#e07070' : '#3a0a0a';
+    drawPixelIcon(bCtx, HEART_GRID, x, 0, hColor, '#3a0a0a');
+
+    // Food: each icon = 2 hunger
+    const huFull = hu >= (i + 1) * 2;
+    const huHalf = !huFull && hu >= i * 2 + 1;
+    const fColor = huFull ? '#d4831a' : huHalf ? '#d4a870' : '#2a1a00';
+    drawPixelIcon(bCtx, FOOD_GRID, x, ICON_W + 6, fColor, '#2a1a00');
+  }
+}
+
+// ── HUD ───────────────────────────────────────────────────────────────────────
 const hudEl   = document.getElementById('hud');
 const debugEl = document.getElementById('debug');
 
 function updateHUD() {
-  hudEl.textContent = BlockName[PLACEABLE_BLOCKS[selectedIdx]];
+  const item = inventory.getSelected();
+  hudEl.textContent = item ? (BlockName[item.type] ?? '?') : '—';
   drawHotbar();
+  drawBars();
 }
 updateHUD();
 
 document.addEventListener('wheel', e => {
-  selectedIdx = (selectedIdx + (e.deltaY > 0 ? 1 : -1) + SLOTS) % SLOTS;
+  inventory.scroll(e.deltaY > 0 ? 1 : -1);
   updateHUD();
 }, { passive: true });
 
@@ -185,8 +425,7 @@ function updateDayNight(dt) {
   sun.castShadow   = sunH > 0.2;
 
   if (sunH > 0.2) {
-    skyColor.copy(C_SKY_DAY);
-    ambient.color.copy(C_AMB_DAY);
+    skyColor.copy(C_SKY_DAY); ambient.color.copy(C_AMB_DAY);
   } else if (sunH > -0.15) {
     const t = (sunH + 0.15) / 0.35;
     if (t < 0.5) {
@@ -197,17 +436,13 @@ function updateDayNight(dt) {
       ambient.color.lerpColors(C_AMB_NIGHT, C_AMB_DAY, t);
     }
   } else {
-    skyColor.copy(C_SKY_NIGHT);
-    ambient.color.copy(C_AMB_NIGHT);
+    skyColor.copy(C_SKY_NIGHT); ambient.color.copy(C_AMB_NIGHT);
   }
   scene.fog.color.copy(skyColor);
 
-  sun.target.position.copy(player.position);
-  sun.target.updateMatrixWorld();
-  moon.target.position.copy(player.position);
-  moon.target.updateMatrixWorld();
+  sun.target.position.copy(player.position); sun.target.updateMatrixWorld();
+  moon.target.position.copy(player.position); moon.target.updateMatrixWorld();
 
-  // Disques soleil / lune — positionnés dans la direction de chaque astre
   _sunDir.set(sx, sy, 60).normalize();
   sunDisc.position.copy(camera.position).addScaledVector(_sunDir, 180);
   sunDisc.lookAt(camera.position);
@@ -219,7 +454,6 @@ function updateDayNight(dt) {
   moonDisc.lookAt(camera.position);
   moonDisc.visible = sunH < 0.15;
 
-  // Étoiles — opacity inversement proportionnelle au soleil
   starMesh.position.copy(camera.position);
   starMat.opacity = Math.max(0, Math.min(1, (-sunH - 0.05) / 0.25));
 }
@@ -233,7 +467,7 @@ function loop(now) {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
 
-  if (input.isLocked) {
+  if (input.isLocked && !inventoryOpen) {
     overlay.style.display = 'none';
 
     player.update(dt);
@@ -244,7 +478,6 @@ function loop(now) {
     interactCooldown -= dt;
     const hit = world.raycast(camera.position, player.getCameraDirection());
 
-    // Boîte de sélection autour du bloc visé
     if (hit) {
       selectionBox.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
       selectionBox.visible = true;
@@ -253,28 +486,48 @@ function loop(now) {
     }
 
     if (interactCooldown <= 0 && hit) {
+      const sel = inventory.getSelected();
+
       if (input.consumeMouseButton(0)) {
+        // Casser bloc → ajouter à l'inventaire
+        const broken = world.getVoxelWorld(hit.x, hit.y, hit.z);
         world.setVoxelWorld(hit.x, hit.y, hit.z, BlockType.AIR);
+        if (broken !== BlockType.AIR) inventory.add(broken);
         rebuildAround(hit.x, hit.z);
         interactCooldown = 0.15;
+        updateHUD();
       } else if (input.consumeMouseButton(2)) {
-        const px = hit.x + hit.face[0];
-        const py = hit.y + hit.face[1];
-        const pz = hit.z + hit.face[2];
-        if (!collidesWithPlayer(px, py, pz)) {
-          world.setVoxelWorld(px, py, pz, PLACEABLE_BLOCKS[selectedIdx]);
-          rebuildAround(px, pz);
+        if (sel && isFood(sel.type)) {
+          // Manger la nourriture
+          player.eat(FOOD_DATA[sel.type].restore);
+          inventory.consume(inventory.selected, 1);
+          interactCooldown = 0.15;
+          updateHUD();
+        } else if (sel && isBlock(sel.type)) {
+          // Poser un bloc
+          const px = hit.x + hit.face[0];
+          const py = hit.y + hit.face[1];
+          const pz = hit.z + hit.face[2];
+          if (!collidesWithPlayer(px, py, pz)) {
+            world.setVoxelWorld(px, py, pz, sel.type);
+            inventory.consume(inventory.selected, 1);
+            rebuildAround(px, pz);
+            interactCooldown = 0.15;
+            updateHUD();
+          }
         }
-        interactCooldown = 0.15;
       }
     }
 
-    const p    = player.position;
+    // Update bars chaque frame (santé/faim peuvent changer)
+    drawBars();
+
+    const p = player.position;
     const totalH = timeOfDay * 24;
-    const hh   = Math.floor(totalH) % 24;
-    const mm   = Math.floor((totalH % 1) * 60);
+    const hh = Math.floor(totalH) % 24;
+    const mm = Math.floor((totalH % 1) * 60);
     debugEl.textContent = `pos: ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}  |  ${String(hh).padStart(2,'0')}h${String(mm).padStart(2,'0')}`;
-  } else {
+  } else if (!inventoryOpen) {
     overlay.style.display = 'flex';
   }
 

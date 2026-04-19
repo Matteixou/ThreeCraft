@@ -23,9 +23,17 @@ export class Player {
     this.onGround = false;
     this.yaw      = 0;
     this.pitch    = 0;
+    this.health    = 20;
+    this.maxHealth = 20;
+    this.hunger    = 20;
+    this.maxHunger = 20;
+    this._hungerTimer = 0;
+    this._starveTimer = 0;
+    this._regenTimer  = 0;
   }
 
   update(dt) {
+    this._updateNeeds(dt);
     this._look();
     this._move(dt);
     this._physics(dt);
@@ -72,8 +80,12 @@ export class Player {
     this.position.z += this.velocity.z * dt;
     this._resolveZ();
 
+    const _preVelY = this.velocity.y;
     this.position.y += this.velocity.y * dt;
     this._resolveY();
+    if (this.onGround && _preVelY < -12) {
+      this.takeDamage(Math.floor((-_preVelY - 12) * 1.5));
+    }
   }
 
   _solid(x, y, z) {
@@ -169,5 +181,37 @@ export class Player {
     const dir = new THREE.Vector3();
     this.camera.getWorldDirection(dir);
     return dir;
+  }
+
+  takeDamage(n) {
+    this.health = Math.max(0, this.health - n);
+    if (this.health === 0) this._die();
+  }
+
+  _die() {
+    this.health = this.maxHealth;
+    this.hunger = this.maxHunger;
+    this.position.set(8, 70, 8);
+    this.velocity.set(0, 0, 0);
+  }
+
+  eat(restore) {
+    this.hunger = Math.min(this.maxHunger, this.hunger + restore);
+  }
+
+  _updateNeeds(dt) {
+    this._hungerTimer += dt;
+    if (this._hungerTimer >= 30) {
+      this._hungerTimer = 0;
+      this.hunger = Math.max(0, this.hunger - 1);
+    }
+    if (this.hunger === 0) {
+      this._starveTimer += dt;
+      if (this._starveTimer >= 4) { this._starveTimer = 0; this.takeDamage(1); }
+    } else { this._starveTimer = 0; }
+    if (this.hunger >= 18 && this.health < this.maxHealth) {
+      this._regenTimer += dt;
+      if (this._regenTimer >= 0.5) { this._regenTimer = 0; this.health = Math.min(this.maxHealth, this.health + 1); }
+    } else { this._regenTimer = 0; }
   }
 }

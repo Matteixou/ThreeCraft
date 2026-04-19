@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-const CLOUD_Y = 62;   // altitude des nuages
+const CLOUD_Y = 75;   // altitude des nuages
 const CLOUD_H = 5;    // épaisseur (blocs)
 const CELL    = 14;   // largeur d'une cellule de nuage (unités monde)
 const HALF    = 26;   // grille de (HALF*2+1)² cellules autour du joueur

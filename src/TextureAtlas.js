@@ -22,6 +22,8 @@ export const TileId = {
   TALL_GRASS_T: 12,
   FLOWER_RED_T: 13,
   FLOWER_YEL_T: 14,
+  APPLE_T:      15,
+  BREAD_T:      16,
 };
 
 // UV rect [u0, v0, u1, v1] for a tile (Three.js: Y=0 at bottom)
@@ -50,6 +52,8 @@ export function getBlockTile(blockType, faceIdx) {
     case BlockType.TALL_GRASS:  return TileId.TALL_GRASS_T;
     case BlockType.FLOWER_RED:  return TileId.FLOWER_RED_T;
     case BlockType.FLOWER_YEL:  return TileId.FLOWER_YEL_T;
+    case 100: return TileId.APPLE_T;
+    case 101: return TileId.BREAD_T;
     default: return TileId.DIRT;
   }
 }
@@ -255,13 +259,36 @@ function drawFlowerYel(d) {
   }
 }
 
-// Ordre exact correspondant à TileId (0 → 14)
+function drawApple(d) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const dx = x - 7.5, dy = y - 9.5;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const v = rnd(x, y, 20);
+    if (y <= 3 && (x === 7 || x === 8)) { px(d, x, y, 90, 55, 20); continue; }
+    if ((y === 2 || y === 3) && x >= 9 && x <= 11) { px(d, x, y, 40, 148, 40); continue; }
+    if (dist < 5.5) { px(d, x, y, K(185+v*45), K(22+v*18), K(22+v*12)); }
+    else            { px(d, x, y, 0, 0, 0, 0); }
+  }
+}
+
+function drawBread(d) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const v = rnd(x, y, 21);
+    const inBread = y >= 3 && y <= 13 && x >= 1 && x <= 14;
+    if (!inBread) { px(d, x, y, 0, 0, 0, 0); continue; }
+    if (y <= 5) px(d, x, y, K(185+v*30), K(112+v*20), K(48+v*15));
+    else        px(d, x, y, K(218+v*22), K(162+v*16), K(82+v*10));
+  }
+}
+
+// Ordre exact correspondant à TileId (0 → 16)
 const DRAWERS = [
   drawGrassTop, drawGrassSide, drawDirt, drawStone, drawSand,
   drawWoodSide, drawWoodTop, drawLeaves,
   drawSnowTop, drawSnowSide,
   drawCactusSide, drawCactusTop,
   drawTallGrass, drawFlowerRed, drawFlowerYel,
+  drawApple, drawBread,
 ];
 
 // ── Export : création de l'atlas ──────────────────────────────────────────────

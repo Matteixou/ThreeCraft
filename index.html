@@ -11,7 +11,7 @@
 
     #overlay {
       position: fixed; inset: 0;
-      background: rgba(0, 0, 0, 0.75);
+      background: rgba(0,0,0,0.75);
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
       color: #fff; cursor: pointer; z-index: 10;
@@ -27,6 +27,15 @@
       text-shadow: 0 0 4px #000;
     }
 
+    /* Barres santé/faim au-dessus de la hotbar */
+    #bars {
+      position: fixed; bottom: 82px; left: 50%;
+      transform: translateX(-50%);
+      image-rendering: pixelated;
+      pointer-events: none;
+    }
+
+    /* Hotbar */
     #hotbar {
       position: fixed; bottom: 16px; left: 50%;
       transform: translateX(-50%);
@@ -34,15 +43,16 @@
       pointer-events: none;
     }
 
+    /* Nom du bloc sélectionné */
     #hud {
-      position: fixed; bottom: 80px; left: 50%;
-      transform: translateX(-50%);
+      position: fixed; bottom: 76px; right: calc(50% - 240px);
       background: rgba(0,0,0,0.55);
-      color: #fff; font-size: 13px;
-      padding: 4px 14px; border-radius: 4px;
+      color: #fff; font-size: 12px;
+      padding: 3px 10px; border-radius: 4px;
       pointer-events: none;
     }
 
+    /* Debug */
     #debug {
       position: fixed; top: 10px; left: 10px;
       background: rgba(0,0,0,0.5);
@@ -51,12 +61,28 @@
       pointer-events: none;
     }
 
+    /* Contrôles */
     #controls {
       position: fixed; top: 10px; right: 10px;
       background: rgba(0,0,0,0.5);
       color: #ccc; font-size: 11px;
       padding: 6px 12px; border-radius: 4px;
-      pointer-events: none; line-height: 1.6;
+      pointer-events: none; line-height: 1.7;
+    }
+
+    /* Overlay inventaire */
+    #inv-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55);
+      align-items: center; justify-content: center;
+      z-index: 20;
+    }
+
+    #inv-canvas {
+      image-rendering: pixelated;
+      border-radius: 6px;
+      cursor: default;
     }
   </style>
 </head>
@@ -66,15 +92,20 @@
     <p>Cliquez pour jouer</p>
   </div>
   <div id="crosshair">+</div>
+  <canvas id="bars"></canvas>
   <canvas id="hotbar"></canvas>
-  <div id="hud">GRASS</div>
+  <div id="hud">—</div>
   <div id="debug">pos: 0 0 0</div>
   <div id="controls">
     WASD — déplacer<br>
     Espace — sauter<br>
+    E — inventaire<br>
     Clic G — casser<br>
-    Clic D — poser<br>
+    Clic D — poser / manger<br>
     Molette — changer
+  </div>
+  <div id="inv-overlay">
+    <canvas id="inv-canvas"></canvas>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>
