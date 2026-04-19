@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { BlockType } from './Voxel.js';
+
+const NO_COLLISION = new Set([BlockType.AIR, BlockType.TALL_GRASS, BlockType.FLOWER_RED, BlockType.FLOWER_YEL]);
 
 const PLAYER_HEIGHT   = 1.8;  // hauteur de la hitbox (pieds → tête)
 const EYE_OFFSET      = 1.6;  // hauteur des yeux au-dessus des pieds
@@ -73,9 +76,8 @@ export class Player {
     this._resolveY();
   }
 
-  // Voxel solide en coordonnées continues ?
   _solid(x, y, z) {
-    return this.world.getVoxelWorld(Math.floor(x), Math.floor(y), Math.floor(z)) !== 0;
+    return !NO_COLLISION.has(this.world.getVoxelWorld(Math.floor(x), Math.floor(y), Math.floor(z)));
   }
 
   _resolveX() {
