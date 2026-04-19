@@ -117,7 +117,10 @@ let gameStarted = false;
 const menuOverlay = document.getElementById('menu-overlay');
 const menuCanvas  = document.getElementById('menu-canvas');
 
-const menu = new Menu(menuCanvas, () => {
+const menu = new Menu(menuCanvas, (settings) => {
+  // Appliquer les paramètres graphiques
+  renderer.shadowMap.enabled = settings.shadows;
+  if (!settings.fog) scene.fog = null;
   menu.destroy();
   menuOverlay.style.display = 'none';
   renderer.domElement.requestPointerLock();
@@ -645,12 +648,18 @@ function _rebuildMinimapTiles() {
   const d    = img.data;
   const sc   = MM_SIZE / (MM_RADIUS * 2); // px par bloc = 2
 
+  // Blocs ignorés sur la minimap (arbres, déco) — on veut voir le sol
+  const MM_SKIP = new Set([
+    BlockType.LEAVES, BlockType.WOOD, BlockType.TALL_GRASS,
+    BlockType.FLOWER_RED, BlockType.FLOWER_YEL, BlockType.CACTUS,
+  ]);
+
   for (let dz = -MM_RADIUS; dz < MM_RADIUS; dz++) {
     for (let dx = -MM_RADIUS; dx < MM_RADIUS; dx++) {
       let type = BlockType.AIR, topY = 0;
       for (let y = 63; y >= 0; y--) {
         const t = world.getVoxelWorld(px + dx, y, pz + dz);
-        if (t !== BlockType.AIR) { type = t; topY = y; break; }
+        if (t !== BlockType.AIR && !MM_SKIP.has(t)) { type = t; topY = y; break; }
       }
       const col   = BlockColor[type] ?? 0x111111;
       const shade = type === BlockType.AIR ? 0.08 : 0.52 + (topY / 63) * 0.48;
