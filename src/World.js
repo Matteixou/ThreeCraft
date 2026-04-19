@@ -225,11 +225,13 @@ export class World {
     for (const [key, chunk] of this.chunks) {
       const [cx, cz] = key.split(',').map(Number);
       if (Math.abs(cx - pcx) > RENDER_DIST + 1 || Math.abs(cz - pcz) > RENDER_DIST + 1) {
-        if (chunk.mesh) {
-          this.scene.remove(chunk.mesh);
-          chunk.mesh.geometry.dispose();
-          chunk.mesh.material.dispose();
-          chunk.mesh = null;
+        for (const key of ['mesh', 'meshCross']) {
+          if (chunk[key]) {
+            this.scene.remove(chunk[key]);
+            chunk[key].geometry.dispose();
+            chunk[key].material.dispose();
+            chunk[key] = null;
+          }
         }
         this.chunks.delete(key);
       }
