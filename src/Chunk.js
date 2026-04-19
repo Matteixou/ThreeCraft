@@ -172,7 +172,7 @@ export class Chunk {
       geo.setAttribute('uv',       new THREE.Float32BufferAttribute(sUV,   2));
       geo.setIndex(sIdx);
       this.mesh = new THREE.Mesh(geo, this.world.solidMat);
-      this.mesh.receiveShadow = this.mesh.castShadow = true;
+      this.mesh.receiveShadow = true;
       scene.add(this.mesh);
     }
 

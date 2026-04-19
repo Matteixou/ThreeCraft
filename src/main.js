@@ -10,11 +10,11 @@ import { Inventory, HOTBAR_SIZE, GRID_ROWS } from './Inventory.js';
 import { Menu } from './Menu.js';
 
 // ── Renderer ──────────────────────────────────────────────────────────────────
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type    = THREE.BasicShadowMap;
 document.body.appendChild(renderer.domElement);
 
 // ── Scène ─────────────────────────────────────────────────────────────────────
@@ -29,11 +29,11 @@ const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerH
 // ── Lumières ──────────────────────────────────────────────────────────────────
 const sun = new THREE.DirectionalLight(0xfff4e0, 1.6);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(512, 512);
 sun.shadow.camera.near   = 0.5;
-sun.shadow.camera.far    = 300;
-sun.shadow.camera.left   = sun.shadow.camera.bottom = -60;
-sun.shadow.camera.right  = sun.shadow.camera.top    =  60;
+sun.shadow.camera.far    = 80;
+sun.shadow.camera.left   = sun.shadow.camera.bottom = -32;
+sun.shadow.camera.right  = sun.shadow.camera.top    =  32;
 scene.add(sun);
 scene.add(sun.target);
 
@@ -91,15 +91,32 @@ const player    = new Player(camera, world, input);
 const clouds    = new CloudSystem(scene);
 const inventory = new Inventory();
 
-// Inventaire de départ
-inventory.slots[0] = { type: BlockType.GRASS,  count: 32 };
-inventory.slots[1] = { type: BlockType.DIRT,   count: 32 };
-inventory.slots[2] = { type: BlockType.STONE,  count: 32 };
-inventory.slots[3] = { type: BlockType.SAND,   count: 16 };
-inventory.slots[4] = { type: BlockType.WOOD,   count: 16 };
-inventory.slots[5] = { type: BlockType.LEAVES, count: 16 };
-inventory.slots[6] = { type: 100, count: 5 }; // APPLE
-inventory.slots[7] = { type: 101, count: 3 }; // BREAD
+// Inventaire de départ (hotbar + grid)
+inventory.slots[0] = { type: BlockType.GRASS,          count: 32 };
+inventory.slots[1] = { type: BlockType.STONE,          count: 32 };
+inventory.slots[2] = { type: BlockType.COBBLESTONE,    count: 32 };
+inventory.slots[3] = { type: BlockType.PLANKS,         count: 32 };
+inventory.slots[4] = { type: BlockType.GLASS,          count: 16 };
+inventory.slots[5] = { type: BlockType.BRICK,          count: 16 };
+inventory.slots[6] = { type: BlockType.GLOWSTONE,      count: 8  };
+inventory.slots[7] = { type: BlockType.CRAFTING_TABLE, count: 2  };
+inventory.slots[8] = { type: BlockType.TNT,            count: 4  };
+inventory.slots[9]  = { type: BlockType.CHEST,         count: 4  };
+inventory.slots[10] = { type: BlockType.BOOKSHELF,     count: 8  };
+inventory.slots[11] = { type: BlockType.FURNACE,       count: 2  };
+inventory.slots[12] = { type: BlockType.OBSIDIAN,      count: 8  };
+inventory.slots[13] = { type: BlockType.WOOD,          count: 32 };
+inventory.slots[14] = { type: BlockType.DIRT,          count: 32 };
+inventory.slots[15] = { type: 100, count: 10 }; // APPLE
+inventory.slots[16] = { type: 101, count: 5  }; // BREAD
+
+// ── Plan d'eau (niveau de mer y=12.9) ────────────────────────────────────────
+const waterMat  = new THREE.MeshLambertMaterial({ color: 0x2a6fcf, transparent: true, opacity: 0.72 });
+const waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(1024, 1024), waterMat);
+waterMesh.rotation.x = -Math.PI / 2;
+waterMesh.position.y = 12.9;
+waterMesh.renderOrder = 1;
+scene.add(waterMesh);
 
 // ── Spawn au sol ──────────────────────────────────────────────────────────────
 world.update(player.position);
@@ -826,6 +843,8 @@ function loop(now) {
     player.update(dt);
     world.update(player.position);
     clouds.update(player.position.x, player.position.z, dt);
+    waterMesh.position.x = player.position.x;
+    waterMesh.position.z = player.position.z;
     updateDayNight(dt);
 
     interactCooldown -= dt;

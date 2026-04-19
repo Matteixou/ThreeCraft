@@ -107,29 +107,59 @@ export class World {
   }
 
   _generateChunk(chunk) {
-    // Passe 1 : terrain avec hauteur blendée par biome
+    const N = CHUNK_SIZE * CHUNK_SIZE;
+    // Cache par colonne : évite de recalculer temp/humi/biome à chaque passe
+    const colBiome = new Array(N);
+    const colH     = new Int8Array(N);
+
+    // Passe 1 : terrain avec hauteur blendée + bedrock + grottes
     for (let z = 0; z < CHUNK_SIZE; z++) {
       for (let x = 0; x < CHUNK_SIZE; x++) {
-        const wx    = chunk.chunkX * CHUNK_SIZE + x;
-        const wz    = chunk.chunkZ * CHUNK_SIZE + z;
-        const biome = this._getDominantBiome(wx, wz);
-        const bd    = BIOME_DATA[biome];
-        const h     = this._getBlendedHeight(wx, wz);
+        const wx   = chunk.chunkX * CHUNK_SIZE + x;
+        const wz   = chunk.chunkZ * CHUNK_SIZE + z;
+        const temp = this.noise.getTemperature(wx, wz);
+        const humi = this.noise.getHumidity(wx, wz);
+        const w    = this._getBiomeWeights(temp, humi);
+        const biome = Object.entries(w).reduce((a, b) => (a[1] > b[1] ? a : b))[0];
+        let h = 0;
+        for (const [b, wt] of Object.entries(w)) {
+          if (wt < 0.001) continue;
+          const bd = BIOME_DATA[b];
+          h += (bd.base + this.noise.getHeight(wx, wz, bd.freq) * bd.amp) * wt;
+        }
+        const height = Math.max(1, Math.min(CHUNK_HEIGHT - 2, Math.floor(h)));
+        const idx    = x + z * CHUNK_SIZE;
+        colBiome[idx] = biome;
+        colH[idx]     = height;
 
-        // Blocs de surface selon biome (et altitude pour les montagnes)
+        const bd = BIOME_DATA[biome];
         let surfaceBlock = bd.surface;
         let subBlock     = bd.sub;
         if (biome === 'MOUNTAINS') {
-          if      (h > 48) { surfaceBlock = BlockType.SNOW;  subBlock = BlockType.STONE; }
-          else if (h > 36) { surfaceBlock = BlockType.STONE; subBlock = BlockType.STONE; }
-          else             { surfaceBlock = BlockType.GRASS; subBlock = BlockType.DIRT;  }
+          if      (height > 48) { surfaceBlock = BlockType.SNOW;  subBlock = BlockType.STONE; }
+          else if (height > 36) { surfaceBlock = BlockType.STONE; subBlock = BlockType.STONE; }
+          else                  { surfaceBlock = BlockType.GRASS; subBlock = BlockType.DIRT;  }
         }
 
-        for (let y = 0; y <= h && y < CHUNK_HEIGHT; y++) {
+        // Bedrock à y=0
+        chunk.setVoxel(x, 0, z, BlockType.STONE);
+
+        for (let y = 1; y <= height && y < CHUNK_HEIGHT; y++) {
           let type;
-          if      (y === h)    type = surfaceBlock;
-          else if (y >= h - 3) type = subBlock;
-          else                 type = BlockType.STONE;
+          if      (y === height)    type = surfaceBlock;
+          else if (y >= height - 3) type = subBlock;
+          else                      type = BlockType.STONE;
+
+          // Grottes : pattern sinusoïdal avec phase variable par région
+          if (y > 3 && y < height - 1) {
+            const rx = wx >> 4, rz = wz >> 4, ry = y >> 4;
+            const ph = hash(rx * 7 + ry * 13, rz * 11 + 200) * 3.14159;
+            const cave = Math.sin(wx * 0.22 + ph + y * 0.38)
+                       * Math.sin(wz * 0.26 + ph * 0.7 + y * 0.29)
+                       * Math.cos(y * 0.44 + ph * 0.4);
+            if (cave > 0.32) continue; // laisse AIR
+          }
+
           chunk.setVoxel(x, y, z, type);
         }
       }
@@ -138,8 +168,8 @@ export class World {
     // Passe 2 : minerais
     this._generateOres(chunk);
 
-    // Passe 3 : décors
-    this._generateDecorations(chunk);
+    // Passe 3 : décors (utilise le cache colonne)
+    this._generateDecorations(chunk, colBiome, colH);
 
     // Passe 4 : structures (villages, châteaux, ruines, chambres secrètes)
     this._applyStructures(chunk);
@@ -175,19 +205,36 @@ export class World {
     }
   }
 
-  _generateDecorations(chunk) {
+  _generateDecorations(chunk, colBiome, colH) {
     for (let z = 0; z < CHUNK_SIZE; z++) {
       for (let x = 0; x < CHUNK_SIZE; x++) {
-        // Surface = bloc solide le plus haut
-        let surfaceY = -1;
-        for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
-          if (chunk.getVoxel(x, y, z) !== BlockType.AIR) { surfaceY = y; break; }
+        // Utilise le cache si disponible, sinon scan
+        let surfaceY, biome;
+        if (colBiome) {
+          const idx = x + z * CHUNK_SIZE;
+          biome    = colBiome[idx];
+          surfaceY = colH[idx];
+          // Les grottes peuvent avoir modifié la surface : vérification rapide
+          if (chunk.getVoxel(x, surfaceY, z) === BlockType.AIR) {
+            // Surface a été creusée par une grotte, scanner depuis le haut
+            surfaceY = -1;
+            for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
+              if (chunk.getVoxel(x, y, z) !== BlockType.AIR) { surfaceY = y; break; }
+            }
+          }
+        } else {
+          surfaceY = -1;
+          for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
+            if (chunk.getVoxel(x, y, z) !== BlockType.AIR) { surfaceY = y; break; }
+          }
+          const wx2 = chunk.chunkX * CHUNK_SIZE + x;
+          const wz2 = chunk.chunkZ * CHUNK_SIZE + z;
+          biome = this._getDominantBiome(wx2, wz2);
         }
         if (surfaceY < 0 || surfaceY + 1 >= CHUNK_HEIGHT) continue;
 
         const wx      = chunk.chunkX * CHUNK_SIZE + x;
         const wz      = chunk.chunkZ * CHUNK_SIZE + z;
-        const biome   = this._getDominantBiome(wx, wz);
         const r       = hash(wx, wz);
         const surface = chunk.getVoxel(x, surfaceY, z);
         const inBounds = x >= 2 && x < CHUNK_SIZE - 2 && z >= 2 && z < CHUNK_SIZE - 2;
@@ -353,7 +400,7 @@ export class World {
   }
 
   update(playerPos) {
-    const RENDER_DIST = 4;
+    const RENDER_DIST = 3;
     const pcx = Math.floor(playerPos.x / CHUNK_SIZE);
     const pcz = Math.floor(playerPos.z / CHUNK_SIZE);
 
@@ -364,13 +411,13 @@ export class World {
         needed.push({ cx: pcx + dx, cz: pcz + dz, d2: dx * dx + dz * dz });
     needed.sort((a, b) => a.d2 - b.d2);
 
-    // Limiter la génération à 2 nouveaux chunks par frame (évite les freezes)
+    // Max 1 chunk généré + 1 mesh reconstruit par frame pour éviter les freezes
     let newThisFrame = 0;
     let rebuiltThisFrame = 0;
     for (const { cx, cz } of needed) {
       const key = this._key(cx, cz);
       if (!this.chunks.has(key)) {
-        if (newThisFrame >= 2) continue;
+        if (newThisFrame >= 1) continue;
         newThisFrame++;
         const chunk = new Chunk(cx, cz, this);
         this._generateChunk(chunk);
@@ -378,7 +425,7 @@ export class World {
       }
       const chunk = this.chunks.get(key);
       if (chunk.isDirty) {
-        if (rebuiltThisFrame >= 2) continue;
+        if (rebuiltThisFrame >= 1) continue;
         rebuiltThisFrame++;
       }
       chunk.buildMesh(this.scene);
