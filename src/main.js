@@ -7,6 +7,7 @@ import { CHUNK_SIZE } from './Chunk.js';
 import { getBlockTile } from './TextureAtlas.js';
 import { CloudSystem } from './Clouds.js';
 import { Inventory, HOTBAR_SIZE, GRID_ROWS } from './Inventory.js';
+import { Menu } from './Menu.js';
 
 // ── Renderer ──────────────────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -111,7 +112,19 @@ for (let y = 63; y >= 0; y--) {
   }
 }
 
-// ── Pointer lock ──────────────────────────────────────────────────────────────
+// ── Menu principal ────────────────────────────────────────────────────────────
+let gameStarted = false;
+const menuOverlay = document.getElementById('menu-overlay');
+const menuCanvas  = document.getElementById('menu-canvas');
+
+const menu = new Menu(menuCanvas, () => {
+  menu.destroy();
+  menuOverlay.style.display = 'none';
+  renderer.domElement.requestPointerLock();
+  gameStarted = true;
+});
+
+// ── Pointer lock (reprise après ESC) ─────────────────────────────────────────
 const overlay = document.getElementById('overlay');
 overlay.addEventListener('click', () => {
   if (!inventoryOpen) renderer.domElement.requestPointerLock();
@@ -699,7 +712,7 @@ function loop(now) {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
 
-  if (input.isLocked && !inventoryOpen) {
+  if (input.isLocked && !inventoryOpen && gameStarted) {
     overlay.style.display = 'none';
 
     player.update(dt);
@@ -763,7 +776,7 @@ function loop(now) {
     const hh = Math.floor(totalH) % 24;
     const mm = Math.floor((totalH % 1) * 60);
     debugEl.textContent = `pos: ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}  |  ${String(hh).padStart(2,'0')}h${String(mm).padStart(2,'0')}`;
-  } else if (!inventoryOpen) {
+  } else if (!inventoryOpen && gameStarted) {
     overlay.style.display = 'flex';
   }
 

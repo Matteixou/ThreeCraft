@@ -87,9 +87,15 @@
   </style>
 </head>
 <body>
-  <div id="overlay">
+  <!-- Menu principal -->
+  <div id="menu-overlay" style="position:fixed;inset:0;z-index:50;">
+    <canvas id="menu-canvas" style="display:block;"></canvas>
+  </div>
+
+  <!-- Reprendre après perte du pointer lock -->
+  <div id="overlay" style="display:none;">
     <h1>ThreeCraft</h1>
-    <p>Cliquez pour jouer</p>
+    <p>Cliquez pour reprendre</p>
   </div>
   <div id="crosshair">+</div>
   <canvas id="bars"></canvas>
