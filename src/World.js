@@ -3,6 +3,7 @@ import { Chunk, CHUNK_SIZE, CHUNK_HEIGHT } from './Chunk.js';
 import { BlockType } from './Voxel.js';
 import { NoiseGenerator } from './NoiseGenerator.js';
 import { createTextureAtlas } from './TextureAtlas.js';
+import { placeVillage, placeCastle, placeRuin, placeChamber } from './Structures.js';
 
 // Paramètres de terrain par biome
 const BIOME_DATA = {
@@ -52,26 +53,68 @@ export class World {
     return this.chunks.get(key);
   }
 
-  // Détermine le biome depuis température [0,1] et humidité [0,1]
-  _getBiome(wx, wz) {
+  // Smoothstep helper
+  _ss(v, lo, hi) {
+    const t = Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
+    return t * t * (3 - 2 * t);
+  }
+
+  // Poids de chaque biome en un point (normalisés, somme = 1)
+  _getBiomeWeights(temp, humi) {
+    const ss = this._ss.bind(this);
+    const snowW   = 1 - ss(temp, 0.28, 0.40);
+    const desW    = ss(temp, 0.56, 0.68);
+    const rem     = 1 - snowW - desW;
+    const mountW  = rem * (1 - ss(humi, 0.18, 0.28));
+    const remMD   = rem - mountW;
+    const forW    = remMD * ss(humi, 0.52, 0.65);
+    const plainsW = Math.max(0, remMD - forW);
+    const total   = snowW + desW + mountW + forW + plainsW || 1;
+    return {
+      SNOW:      snowW   / total,
+      DESERT:    desW    / total,
+      MOUNTAINS: mountW  / total,
+      FOREST:    forW    / total,
+      PLAINS:    plainsW / total,
+    };
+  }
+
+  // Biome dominant (le plus fort en ce point)
+  _getDominantBiome(wx, wz) {
     const temp = this.noise.getTemperature(wx, wz);
     const humi = this.noise.getHumidity(wx, wz);
-    if (temp < 0.33)               return 'SNOW';
-    if (temp > 0.62)               return 'DESERT';
-    if (humi < 0.22)               return 'MOUNTAINS';
-    if (humi > 0.60)               return 'FOREST';
-    return 'PLAINS';
+    const w = this._getBiomeWeights(temp, humi);
+    return Object.entries(w).reduce((a, b) => (a[1] > b[1] ? a : b))[0];
+  }
+
+  // Hauteur de terrain lissée (moyenne pondérée entre biomes voisins)
+  _getBlendedHeight(wx, wz) {
+    const temp = this.noise.getTemperature(wx, wz);
+    const humi = this.noise.getHumidity(wx, wz);
+    const w = this._getBiomeWeights(temp, humi);
+    let h = 0;
+    for (const [biome, weight] of Object.entries(w)) {
+      if (weight < 0.001) continue;
+      const bd = BIOME_DATA[biome];
+      h += (bd.base + this.noise.getHeight(wx, wz, bd.freq) * bd.amp) * weight;
+    }
+    return Math.floor(h);
+  }
+
+  // Détermine le biome depuis température [0,1] et humidité [0,1] (legacy — gardé pour compat)
+  _getBiome(wx, wz) {
+    return this._getDominantBiome(wx, wz);
   }
 
   _generateChunk(chunk) {
-    // Passe 1 : terrain par biome
+    // Passe 1 : terrain avec hauteur blendée par biome
     for (let z = 0; z < CHUNK_SIZE; z++) {
       for (let x = 0; x < CHUNK_SIZE; x++) {
         const wx    = chunk.chunkX * CHUNK_SIZE + x;
         const wz    = chunk.chunkZ * CHUNK_SIZE + z;
-        const biome = this._getBiome(wx, wz);
+        const biome = this._getDominantBiome(wx, wz);
         const bd    = BIOME_DATA[biome];
-        const h     = Math.floor(bd.base + this.noise.getHeight(wx, wz, bd.freq) * bd.amp);
+        const h     = this._getBlendedHeight(wx, wz);
 
         // Blocs de surface selon biome (et altitude pour les montagnes)
         let surfaceBlock = bd.surface;
@@ -94,6 +137,10 @@ export class World {
 
     // Passe 2 : décors
     this._generateDecorations(chunk);
+
+    // Passe 3 : structures (villages, châteaux, ruines, chambres secrètes)
+    this._applyStructures(chunk);
+
     chunk.isDirty = true;
   }
 
@@ -109,7 +156,7 @@ export class World {
 
         const wx      = chunk.chunkX * CHUNK_SIZE + x;
         const wz      = chunk.chunkZ * CHUNK_SIZE + z;
-        const biome   = this._getBiome(wx, wz);
+        const biome   = this._getDominantBiome(wx, wz);
         const r       = hash(wx, wz);
         const surface = chunk.getVoxel(x, surfaceY, z);
         const inBounds = x >= 2 && x < CHUNK_SIZE - 2 && z >= 2 && z < CHUNK_SIZE - 2;
@@ -183,6 +230,60 @@ export class World {
     const h = 2 + (hash(x * 31, z * 17) > 0.6 ? 1 : 0); // 2 ou 3 blocs
     for (let i = 0; i < h && baseY + i < CHUNK_HEIGHT; i++) {
       chunk.setVoxel(x, baseY + i, z, BlockType.CACTUS);
+    }
+  }
+
+  // ── Structures procédurales ───────────────────────────────────────────────────
+  // Chaque région (REGION=9 chunks) peut contenir une structure au centre.
+  // On détermine si ce chunk "possède" le centre de sa région (cx%R===R/2, cz%R===R/2)
+  // puis on choisit la structure selon le biome et un hash déterministe.
+  _applyStructures(chunk) {
+    const R = 9; // taille de région en chunks
+    const cx = chunk.chunkX;
+    const cz = chunk.chunkZ;
+
+    // Centre de région
+    const rcx = Math.floor(cx / R) * R + Math.floor(R / 2);
+    const rcz = Math.floor(cz / R) * R + Math.floor(R / 2);
+
+    // Seul le chunk central de chaque région place la structure
+    if (cx !== rcx || cz !== rcz) return;
+
+    // Centre monde de la région
+    const wx = rcx * CHUNK_SIZE + Math.floor(CHUNK_SIZE / 2);
+    const wz = rcz * CHUNK_SIZE + Math.floor(CHUNK_SIZE / 2);
+
+    // Trouver la hauteur de surface en ce point
+    let surfY = -1;
+    const lx = Math.floor(CHUNK_SIZE / 2);
+    const lz = Math.floor(CHUNK_SIZE / 2);
+    for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
+      if (chunk.getVoxel(lx, y, lz) !== BlockType.AIR) { surfY = y; break; }
+    }
+    if (surfY < 2) return;
+
+    const biome = this._getDominantBiome(wx, wz);
+    const seed  = (rcx * 374761393 + rcz * 1073741789) | 0;
+    const r     = ((seed ^ (seed >>> 13)) >>> 0) / 0xFFFFFFFF;
+
+    // Pas de structure dans les déserts (trop plats) ni montagnes hautes
+    if (biome === 'DESERT' && r > 0.3) return;
+    if (biome === 'MOUNTAINS' && surfY > 40) return;
+
+    if (biome === 'PLAINS' || biome === 'FOREST') {
+      if      (r < 0.35) placeVillage(chunk, wx, wz, surfY, seed);
+      else if (r < 0.55) placeCastle(chunk, wx, wz, surfY, seed);
+      else if (r < 0.75) placeRuin(chunk, wx, wz, surfY, seed);
+      else               placeChamber(chunk, wx, wz, surfY, seed);
+    } else if (biome === 'SNOW') {
+      if      (r < 0.30) placeRuin(chunk, wx, wz, surfY, seed);
+      else if (r < 0.55) placeCastle(chunk, wx, wz, surfY, seed);
+      else               placeChamber(chunk, wx, wz, surfY, seed);
+    } else if (biome === 'DESERT') {
+      placeRuin(chunk, wx, wz, surfY, seed);
+    } else {
+      if (r < 0.5) placeChamber(chunk, wx, wz, surfY, seed);
+      else         placeRuin(chunk, wx, wz, surfY, seed);
     }
   }
 
