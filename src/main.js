@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { World } from './World.js';
 import { Player } from './Player.js';
 import { InputHandler } from './InputHandler.js';
-import { BlockType, BlockName, isBlock, isFood, FOOD_DATA } from './Voxel.js';
+import { BlockType, BlockName, BlockColor, isBlock, isFood, FOOD_DATA } from './Voxel.js';
 import { CHUNK_SIZE } from './Chunk.js';
 import { getBlockTile } from './TextureAtlas.js';
 import { CloudSystem } from './Clouds.js';
@@ -622,6 +622,94 @@ function drawBars() {
   }
 }
 
+// ── Minimap ───────────────────────────────────────────────────────────────────
+const minimapCanvas = document.getElementById('minimap');
+const minimapCtx    = minimapCanvas.getContext('2d');
+const MM_SIZE   = 160;
+const MM_RADIUS = 40; // blocs de chaque côté
+minimapCanvas.width = minimapCanvas.height = MM_SIZE;
+
+// Offscreen pour les tuiles monde (ne se rebuilde que quand le joueur bouge d'un bloc)
+const mmOff    = document.createElement('canvas');
+mmOff.width    = mmOff.height = MM_SIZE;
+const mmOffCtx = mmOff.getContext('2d');
+let _mmPX = null, _mmPZ = null;
+
+function _rebuildMinimapTiles() {
+  const px = Math.floor(player.position.x);
+  const pz = Math.floor(player.position.z);
+  if (px === _mmPX && pz === _mmPZ) return;
+  _mmPX = px; _mmPZ = pz;
+
+  const img  = mmOffCtx.createImageData(MM_SIZE, MM_SIZE);
+  const d    = img.data;
+  const sc   = MM_SIZE / (MM_RADIUS * 2); // px par bloc = 2
+
+  for (let dz = -MM_RADIUS; dz < MM_RADIUS; dz++) {
+    for (let dx = -MM_RADIUS; dx < MM_RADIUS; dx++) {
+      let type = BlockType.AIR, topY = 0;
+      for (let y = 63; y >= 0; y--) {
+        const t = world.getVoxelWorld(px + dx, y, pz + dz);
+        if (t !== BlockType.AIR) { type = t; topY = y; break; }
+      }
+      const col   = BlockColor[type] ?? 0x111111;
+      const shade = type === BlockType.AIR ? 0.08 : 0.52 + (topY / 63) * 0.48;
+      const r = ((col >> 16) & 0xff) * shade;
+      const g = ((col >>  8) & 0xff) * shade;
+      const b = ( col        & 0xff) * shade;
+
+      const cx = Math.floor((dx + MM_RADIUS) * sc);
+      const cz = Math.floor((dz + MM_RADIUS) * sc);
+      const sp = Math.ceil(sc);
+      for (let sy = 0; sy < sp; sy++)
+        for (let sx = 0; sx < sp; sx++) {
+          const i = ((cz + sy) * MM_SIZE + cx + sx) * 4;
+          d[i] = r; d[i+1] = g; d[i+2] = b; d[i+3] = 255;
+        }
+    }
+  }
+  mmOffCtx.putImageData(img, 0, 0);
+}
+
+function drawMinimap() {
+  _rebuildMinimapTiles();
+
+  minimapCtx.clearRect(0, 0, MM_SIZE, MM_SIZE);
+
+  // Clip circulaire
+  minimapCtx.save();
+  minimapCtx.beginPath();
+  minimapCtx.arc(MM_SIZE / 2, MM_SIZE / 2, MM_SIZE / 2, 0, Math.PI * 2);
+  minimapCtx.clip();
+  minimapCtx.drawImage(mmOff, 0, 0);
+
+  // Flèche joueur (triangle pointant dans la direction de visée)
+  const cx = MM_SIZE / 2, cy = MM_SIZE / 2;
+  const fx = -Math.sin(player.yaw);
+  const fz = -Math.cos(player.yaw);
+  const tip = 11, wing = 5;
+
+  minimapCtx.beginPath();
+  minimapCtx.moveTo(cx + fx * tip,       cy + fz * tip);
+  minimapCtx.lineTo(cx + (-fz) * wing,   cy + fx * wing);
+  minimapCtx.lineTo(cx - (-fz) * wing,   cy - fx * wing);
+  minimapCtx.closePath();
+  minimapCtx.fillStyle   = '#ffffff';
+  minimapCtx.fill();
+  minimapCtx.strokeStyle = '#000';
+  minimapCtx.lineWidth   = 1;
+  minimapCtx.stroke();
+
+  minimapCtx.restore();
+
+  // Bordure circulaire
+  minimapCtx.beginPath();
+  minimapCtx.arc(MM_SIZE / 2, MM_SIZE / 2, MM_SIZE / 2 - 1, 0, Math.PI * 2);
+  minimapCtx.strokeStyle = 'rgba(255,255,255,0.45)';
+  minimapCtx.lineWidth   = 2;
+  minimapCtx.stroke();
+}
+
 // ── HUD ───────────────────────────────────────────────────────────────────────
 const hudEl   = document.getElementById('hud');
 const debugEl = document.getElementById('debug');
@@ -768,6 +856,7 @@ function loop(now) {
     }
 
     updateArm(dt);
+    drawMinimap();
     // Update bars chaque frame (santé/faim peuvent changer)
     drawBars();
 

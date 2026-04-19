@@ -61,13 +61,14 @@
       pointer-events: none;
     }
 
-    /* Contrôles */
-    #controls {
+    /* Minimap */
+    #minimap {
       position: fixed; top: 10px; right: 10px;
-      background: rgba(0,0,0,0.5);
-      color: #ccc; font-size: 11px;
-      padding: 6px 12px; border-radius: 4px;
-      pointer-events: none; line-height: 1.7;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.40);
+      box-shadow: 0 0 14px rgba(0,0,0,0.75);
+      image-rendering: pixelated;
+      pointer-events: none;
     }
 
     /* Overlay inventaire */
@@ -102,14 +103,7 @@
   <canvas id="hotbar"></canvas>
   <div id="hud">—</div>
   <div id="debug">pos: 0 0 0</div>
-  <div id="controls">
-    WASD — déplacer<br>
-    Espace — sauter<br>
-    E — inventaire<br>
-    Clic G — casser<br>
-    Clic D — poser / manger<br>
-    Molette — changer
-  </div>
+  <canvas id="minimap"></canvas>
   <div id="inv-overlay">
     <canvas id="inv-canvas"></canvas>
   </div>
