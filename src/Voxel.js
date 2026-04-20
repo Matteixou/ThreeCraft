@@ -33,6 +33,36 @@ export const BlockType = {
   GLOWSTONE:      31,
 };
 
+export const ItemType = {
+  APPLE:       100,
+  BREAD:       101,
+  COAL:        102,
+  IRON_INGOT:  103,
+  GOLD_INGOT:  104,
+  DIAMOND:     105,
+  STICK:       106,
+  SWORD_WOOD:  107,
+  SWORD_STONE: 108,
+  SWORD_IRON:  109,
+  SWORD_DIA:   110,
+  PICK_WOOD:   111,
+  PICK_STONE:  112,
+  PICK_IRON:   113,
+  PICK_DIA:    114,
+  HELMET_IRON: 115,
+  CHEST_IRON:  116,
+  LEGS_IRON:   117,
+  BOOTS_IRON:  118,
+  HELMET_DIA:  119,
+  CHEST_DIA:   120,
+  LEGS_DIA:    121,
+  BOOTS_DIA:   122,
+  RAW_BEEF:    123,
+  COOKED_BEEF: 124,
+  FEATHER:     125,
+  BONE:        126,
+};
+
 export const BlockColor = {
   [BlockType.GRASS]:          0x5a8f3c,
   [BlockType.DIRT]:           0x8b6340,
@@ -100,8 +130,34 @@ export const BlockName = {
   [BlockType.CLAY]:           'Argile',
   [BlockType.TNT]:            'TNT',
   [BlockType.GLOWSTONE]:      'Pierre lumineuse',
-  [100]: 'Pomme',
-  [101]: 'Pain',
+  // Items
+  [ItemType.APPLE]:           'Pomme',
+  [ItemType.BREAD]:           'Pain',
+  [ItemType.COAL]:            'Charbon',
+  [ItemType.IRON_INGOT]:      'Lingot de fer',
+  [ItemType.GOLD_INGOT]:      'Lingot d\'or',
+  [ItemType.DIAMOND]:         'Diamant',
+  [ItemType.STICK]:           'B\u00e2ton',
+  [ItemType.SWORD_WOOD]:      '\u00c9p\u00e9e en bois',
+  [ItemType.SWORD_STONE]:     '\u00c9p\u00e9e en pierre',
+  [ItemType.SWORD_IRON]:      '\u00c9p\u00e9e en fer',
+  [ItemType.SWORD_DIA]:       '\u00c9p\u00e9e en diamant',
+  [ItemType.PICK_WOOD]:       'Pioche en bois',
+  [ItemType.PICK_STONE]:      'Pioche en pierre',
+  [ItemType.PICK_IRON]:       'Pioche en fer',
+  [ItemType.PICK_DIA]:        'Pioche en diamant',
+  [ItemType.HELMET_IRON]:     'Casque en fer',
+  [ItemType.CHEST_IRON]:      'Plastron en fer',
+  [ItemType.LEGS_IRON]:       'Jambières en fer',
+  [ItemType.BOOTS_IRON]:      'Bottes en fer',
+  [ItemType.HELMET_DIA]:      'Casque en diamant',
+  [ItemType.CHEST_DIA]:       'Plastron en diamant',
+  [ItemType.LEGS_DIA]:        'Jambières en diamant',
+  [ItemType.BOOTS_DIA]:       'Bottes en diamant',
+  [ItemType.RAW_BEEF]:        'Bœuf cru',
+  [ItemType.COOKED_BEEF]:     'Bœuf cuit',
+  [ItemType.FEATHER]:         'Plume',
+  [ItemType.BONE]:            'Os',
 };
 
 export const PLACEABLE_BLOCKS = [
@@ -130,15 +186,47 @@ export const PLACEABLE_BLOCKS = [
   BlockType.SNOW,
 ];
 
-export const ItemType = {
-  APPLE: 100,
-  BREAD: 101,
+// What drops when breaking a block (undefined = drop the block itself)
+export const BLOCK_DROPS = {
+  [BlockType.COAL_ORE]:    { type: ItemType.COAL,       count: 1 },
+  [BlockType.IRON_ORE]:    { type: ItemType.IRON_INGOT,  count: 1 },
+  [BlockType.GOLD_ORE]:    { type: ItemType.GOLD_INGOT,  count: 1 },
+  [BlockType.DIAMOND_ORE]: { type: ItemType.DIAMOND,     count: 1 },
+  [BlockType.GRASS]:       { type: BlockType.DIRT,        count: 1 },
+  [BlockType.STONE]:       { type: BlockType.COBBLESTONE, count: 1 },
 };
 
 export const FOOD_DATA = {
-  [100]: { restore: 4 },
-  [101]: { restore: 5 },
+  [ItemType.APPLE]:       { restore: 4 },
+  [ItemType.BREAD]:       { restore: 5 },
+  [ItemType.RAW_BEEF]:    { restore: 3 },
+  [ItemType.COOKED_BEEF]: { restore: 8 },
 };
 
-export function isBlock(type) { return type > 0 && type < 100; }
-export function isFood(type)  { return type >= 100; }
+export const WEAPON_DATA = {
+  [ItemType.SWORD_WOOD]:  { damage: 4 },
+  [ItemType.SWORD_STONE]: { damage: 5 },
+  [ItemType.SWORD_IRON]:  { damage: 6 },
+  [ItemType.SWORD_DIA]:   { damage: 7 },
+  [ItemType.PICK_WOOD]:   { damage: 2 },
+  [ItemType.PICK_STONE]:  { damage: 3 },
+  [ItemType.PICK_IRON]:   { damage: 4 },
+  [ItemType.PICK_DIA]:    { damage: 5 },
+};
+
+export const ARMOR_DATA = {
+  [ItemType.HELMET_IRON]:  { defense: 2 },
+  [ItemType.CHEST_IRON]:   { defense: 6 },
+  [ItemType.LEGS_IRON]:    { defense: 5 },
+  [ItemType.BOOTS_IRON]:   { defense: 2 },
+  [ItemType.HELMET_DIA]:   { defense: 3 },
+  [ItemType.CHEST_DIA]:    { defense: 8 },
+  [ItemType.LEGS_DIA]:     { defense: 6 },
+  [ItemType.BOOTS_DIA]:    { defense: 3 },
+};
+
+export function isBlock(type)  { return type > 0 && type < 100; }
+export function isItem(type)   { return type >= 100; }
+export function isFood(type)   { return FOOD_DATA[type] !== undefined; }
+export function isWeapon(type) { return WEAPON_DATA[type] !== undefined; }
+export function isArmor(type)  { return ARMOR_DATA[type] !== undefined; }

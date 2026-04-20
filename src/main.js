@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { World } from './World.js';
 import { Player } from './Player.js';
 import { InputHandler } from './InputHandler.js';
-import { BlockType, BlockName, BlockColor, isBlock, isFood, FOOD_DATA } from './Voxel.js';
-import { CHUNK_SIZE } from './Chunk.js';
+import { BlockType, ItemType, BlockName, BlockColor, isBlock, isFood, FOOD_DATA, BLOCK_DROPS } from './Voxel.js';
+import { CHUNK_SIZE, CHUNK_HEIGHT } from './Chunk.js';
 import { getBlockTile } from './TextureAtlas.js';
 import { CloudSystem } from './Clouds.js';
 import { Inventory, HOTBAR_SIZE, GRID_ROWS } from './Inventory.js';
@@ -92,23 +92,31 @@ const clouds    = new CloudSystem(scene);
 const inventory = new Inventory();
 
 // Inventaire de départ (hotbar + grid)
-inventory.slots[0] = { type: BlockType.GRASS,          count: 32 };
-inventory.slots[1] = { type: BlockType.STONE,          count: 32 };
-inventory.slots[2] = { type: BlockType.COBBLESTONE,    count: 32 };
-inventory.slots[3] = { type: BlockType.PLANKS,         count: 32 };
-inventory.slots[4] = { type: BlockType.GLASS,          count: 16 };
-inventory.slots[5] = { type: BlockType.BRICK,          count: 16 };
-inventory.slots[6] = { type: BlockType.GLOWSTONE,      count: 8  };
-inventory.slots[7] = { type: BlockType.CRAFTING_TABLE, count: 2  };
-inventory.slots[8] = { type: BlockType.TNT,            count: 4  };
-inventory.slots[9]  = { type: BlockType.CHEST,         count: 4  };
-inventory.slots[10] = { type: BlockType.BOOKSHELF,     count: 8  };
-inventory.slots[11] = { type: BlockType.FURNACE,       count: 2  };
-inventory.slots[12] = { type: BlockType.OBSIDIAN,      count: 8  };
-inventory.slots[13] = { type: BlockType.WOOD,          count: 32 };
-inventory.slots[14] = { type: BlockType.DIRT,          count: 32 };
-inventory.slots[15] = { type: 100, count: 10 }; // APPLE
-inventory.slots[16] = { type: 101, count: 5  }; // BREAD
+inventory.slots[0] = { type: BlockType.GRASS,             count: 32 };
+inventory.slots[1] = { type: BlockType.STONE,             count: 32 };
+inventory.slots[2] = { type: BlockType.COBBLESTONE,       count: 32 };
+inventory.slots[3] = { type: BlockType.PLANKS,            count: 32 };
+inventory.slots[4] = { type: BlockType.GLASS,             count: 16 };
+inventory.slots[5] = { type: BlockType.BRICK,             count: 16 };
+inventory.slots[6] = { type: BlockType.GLOWSTONE,         count: 8  };
+inventory.slots[7] = { type: BlockType.CRAFTING_TABLE,    count: 2  };
+inventory.slots[8] = { type: BlockType.TNT,               count: 4  };
+// Grid
+inventory.slots[9]  = { type: BlockType.CHEST,            count: 4  };
+inventory.slots[10] = { type: BlockType.BOOKSHELF,        count: 8  };
+inventory.slots[11] = { type: BlockType.FURNACE,          count: 2  };
+inventory.slots[12] = { type: BlockType.OBSIDIAN,         count: 8  };
+inventory.slots[13] = { type: BlockType.WOOD,             count: 32 };
+inventory.slots[14] = { type: BlockType.DIRT,             count: 32 };
+inventory.slots[15] = { type: ItemType.APPLE,             count: 10 };
+inventory.slots[16] = { type: ItemType.BREAD,             count: 5  };
+inventory.slots[17] = { type: ItemType.COAL,              count: 16 };
+inventory.slots[18] = { type: ItemType.IRON_INGOT,        count: 8  };
+inventory.slots[19] = { type: ItemType.DIAMOND,           count: 3  };
+inventory.slots[20] = { type: ItemType.STICK,             count: 16 };
+inventory.slots[21] = { type: ItemType.SWORD_IRON,        count: 1  };
+inventory.slots[22] = { type: ItemType.PICK_STONE,        count: 1  };
+inventory.slots[23] = { type: ItemType.CHEST_IRON,        count: 1  };
 
 // ── Plan d'eau (niveau de mer y=12.9) ────────────────────────────────────────
 const waterMat  = new THREE.MeshLambertMaterial({ color: 0x2a6fcf, transparent: true, opacity: 0.72 });
@@ -122,7 +130,7 @@ scene.add(waterMesh);
 world.update(player.position);
 const SPAWN_X = Math.round(player.position.x);
 const SPAWN_Z = Math.round(player.position.z);
-for (let y = 63; y >= 0; y--) {
+for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
   if (world.getVoxelWorld(SPAWN_X, y, SPAWN_Z) !== BlockType.AIR) {
     player.position.y = y + 1;
     break;
@@ -193,14 +201,38 @@ charScene.add(charGroup);
 const craftSlots = new Array(4).fill(null); // 2×2
 let craftOutput  = null;
 
+const W = BlockType.WOOD, P = BlockType.PLANKS, CB = BlockType.COBBLESTONE;
+const IT = ItemType;
+// null = slot must be empty
 const RECIPES = [
-  { inputs: [5, 5, 5, 5], output: { type: 12, count: 4 } }, // 4 WOOD → 4 PLANKS
-  { inputs: [12,12,12,12], output: { type: 5,  count: 1 } }, // 4 PLANKS → 1 WOOD
+  // Basic blocks
+  { inputs: [W,  W,  W,  W ], output: { type: P,             count: 4  } }, // 4 WOOD → 4 PLANKS
+  { inputs: [P,  P,  P,  P ], output: { type: W,             count: 1  } }, // 4 PLANKS → 1 WOOD
+  // Crafting materials
+  { inputs: [P,  null, P,  null], output: { type: IT.STICK,      count: 4  } }, // planks col → sticks
+  { inputs: [CB, null, CB, null], output: { type: IT.STICK,      count: 2  } }, // cobble col → sticks (bonus)
+  // Swords (top material x2 + bottom stick)
+  { inputs: [P,  null, IT.STICK, null], output: { type: IT.SWORD_WOOD,  count: 1 } },
+  { inputs: [CB, null, IT.STICK, null], output: { type: IT.SWORD_STONE, count: 1 } },
+  { inputs: [IT.IRON_INGOT, null, IT.STICK, null], output: { type: IT.SWORD_IRON, count: 1 } },
+  { inputs: [IT.DIAMOND,    null, IT.STICK, null], output: { type: IT.SWORD_DIA,  count: 1 } },
+  // Pickaxes (top row 2 material + bottom 2 sticks)
+  { inputs: [P,  P,  IT.STICK, IT.STICK], output: { type: IT.PICK_WOOD,  count: 1 } },
+  { inputs: [CB, CB, IT.STICK, IT.STICK], output: { type: IT.PICK_STONE, count: 1 } },
+  { inputs: [IT.IRON_INGOT, IT.IRON_INGOT, IT.STICK, IT.STICK], output: { type: IT.PICK_IRON, count: 1 } },
+  { inputs: [IT.DIAMOND,    IT.DIAMOND,    IT.STICK, IT.STICK], output: { type: IT.PICK_DIA,  count: 1 } },
+  // Armor (4 material → piece)
+  { inputs: [IT.IRON_INGOT, IT.IRON_INGOT, IT.IRON_INGOT, IT.IRON_INGOT], output: { type: IT.CHEST_IRON, count: 1 } },
+  { inputs: [IT.DIAMOND,    IT.DIAMOND,    IT.DIAMOND,    IT.DIAMOND   ], output: { type: IT.CHEST_DIA,  count: 1 } },
+  { inputs: [IT.IRON_INGOT, null, IT.IRON_INGOT, null], output: { type: IT.HELMET_IRON, count: 1 } },
+  { inputs: [IT.DIAMOND,    null, IT.DIAMOND,    null], output: { type: IT.HELMET_DIA,  count: 1 } },
+  { inputs: [null, IT.IRON_INGOT, null, IT.IRON_INGOT], output: { type: IT.BOOTS_IRON, count: 1 } },
+  { inputs: [null, IT.DIAMOND,    null, IT.DIAMOND   ], output: { type: IT.BOOTS_DIA,  count: 1 } },
 ];
 
 function computeCraft() {
   for (const r of RECIPES) {
-    if (r.inputs.every((t, i) => craftSlots[i]?.type === t)) {
+    if (r.inputs.every((t, i) => t === null ? !craftSlots[i] : craftSlots[i]?.type === t)) {
       craftOutput = { ...r.output }; return;
     }
   }
@@ -668,12 +700,12 @@ function _rebuildMinimapTiles() {
   for (let dz = -MM_RADIUS; dz < MM_RADIUS; dz++) {
     for (let dx = -MM_RADIUS; dx < MM_RADIUS; dx++) {
       let type = BlockType.AIR, topY = 0;
-      for (let y = 63; y >= 0; y--) {
+      for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
         const t = world.getVoxelWorld(px + dx, y, pz + dz);
         if (t !== BlockType.AIR && !MM_SKIP.has(t)) { type = t; topY = y; break; }
       }
       const col   = BlockColor[type] ?? 0x111111;
-      const shade = type === BlockType.AIR ? 0.08 : 0.52 + (topY / 63) * 0.48;
+      const shade = type === BlockType.AIR ? 0.08 : 0.52 + (topY / (CHUNK_HEIGHT - 1)) * 0.48;
       const r = ((col >> 16) & 0xff) * shade;
       const g = ((col >>  8) & 0xff) * shade;
       const b = ( col        & 0xff) * shade;
@@ -862,10 +894,14 @@ function loop(now) {
       const sel = inventory.getSelected();
 
       if (input.consumeMouseButton(0)) {
-        // Casser bloc → ajouter à l'inventaire
+        // Casser bloc → ajouter le drop à l'inventaire
         const broken = world.getVoxelWorld(hit.x, hit.y, hit.z);
         world.setVoxelWorld(hit.x, hit.y, hit.z, BlockType.AIR);
-        if (broken !== BlockType.AIR) inventory.add(broken);
+        if (broken !== BlockType.AIR) {
+          const drop = BLOCK_DROPS[broken];
+          if (drop) inventory.add(drop.type, drop.count);
+          else      inventory.add(broken);
+        }
         rebuildAround(hit.x, hit.z);
         interactCooldown = 0.15;
         triggerArmSwing();

@@ -6,7 +6,7 @@ const { AIR, DIRT, STONE, WOOD, PLANKS, LEAVES, COBBLESTONE } = BlockType;
 function set(chunk, wx, wy, wz, type) {
   const lx = wx - chunk.chunkX * 16;
   const lz = wz - chunk.chunkZ * 16;
-  if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || wy < 1 || wy > 62) return;
+  if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || wy < 1 || wy > 46) return;
   chunk.setVoxel(lx, wy, lz, type);
 }
 

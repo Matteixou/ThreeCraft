@@ -10,7 +10,7 @@ const BIOME_DATA = {
   PLAINS:    { base: 14, amp: 12, freq: 1.0, surface: BlockType.GRASS, sub: BlockType.DIRT  },
   FOREST:    { base: 15, amp: 18, freq: 1.2, surface: BlockType.GRASS, sub: BlockType.DIRT  },
   DESERT:    { base: 11, amp:  7, freq: 0.6, surface: BlockType.SAND,  sub: BlockType.SAND  },
-  MOUNTAINS: { base: 18, amp: 42, freq: 1.8, surface: BlockType.STONE, sub: BlockType.STONE },
+  MOUNTAINS: { base: 18, amp: 28, freq: 1.8, surface: BlockType.STONE, sub: BlockType.STONE },
   SNOW:      { base: 13, amp: 15, freq: 1.0, surface: BlockType.SNOW,  sub: BlockType.DIRT  },
 };
 
@@ -137,8 +137,8 @@ export class World {
         let surfaceBlock = bd.surface;
         let subBlock     = bd.sub;
         if (biome === 'MOUNTAINS') {
-          if      (height > 48) { surfaceBlock = BlockType.SNOW;  subBlock = BlockType.STONE; }
-          else if (height > 36) { surfaceBlock = BlockType.STONE; subBlock = BlockType.STONE; }
+          if      (height > 40) { surfaceBlock = BlockType.SNOW;  subBlock = BlockType.STONE; }
+          else if (height > 28) { surfaceBlock = BlockType.STONE; subBlock = BlockType.STONE; }
           else                  { surfaceBlock = BlockType.GRASS; subBlock = BlockType.DIRT;  }
         }
 
@@ -188,19 +188,19 @@ export class World {
         for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
           if (chunk.getVoxel(x, y, z) !== BlockType.AIR) { surfY = y; break; }
         }
-        for (let y = 1; y < Math.min(surfY - 1, 50); y++) {
+        for (let y = 1; y < Math.min(surfY - 1, 40); y++) {
           if (chunk.getVoxel(x, y, z) !== BlockType.STONE) continue;
           const r = hash(wx * 7 + y * 3, wz * 11 + y * 7);
-          // COAL: y 4-48, freq ~1/30
-          if (y <= 48 && r < 0.033) { chunk.setVoxel(x, y, z, BlockType.COAL_ORE); continue; }
-          // IRON: y 4-40, freq ~1/60
-          if (y <= 40 && r < 0.050 && r >= 0.033) { chunk.setVoxel(x, y, z, BlockType.IRON_ORE); continue; }
-          // GOLD: y 4-20, freq ~1/200
-          if (y <= 20 && r < 0.055 && r >= 0.050) { chunk.setVoxel(x, y, z, BlockType.GOLD_ORE); continue; }
-          // DIAMOND: y 1-12, freq ~1/500
-          if (y <= 12 && r < 0.0572 && r >= 0.055) { chunk.setVoxel(x, y, z, BlockType.DIAMOND_ORE); continue; }
+          // COAL: y 4-36, freq ~1/30
+          if (y <= 36 && r < 0.033) { chunk.setVoxel(x, y, z, BlockType.COAL_ORE); continue; }
+          // IRON: y 4-30, freq ~1/60
+          if (y <= 30 && r < 0.050 && r >= 0.033) { chunk.setVoxel(x, y, z, BlockType.IRON_ORE); continue; }
+          // GOLD: y 4-16, freq ~1/200
+          if (y <= 16 && r < 0.055 && r >= 0.050) { chunk.setVoxel(x, y, z, BlockType.GOLD_ORE); continue; }
+          // DIAMOND: y 1-9, freq ~1/500
+          if (y <= 9  && r < 0.0572 && r >= 0.055) { chunk.setVoxel(x, y, z, BlockType.DIAMOND_ORE); continue; }
           // GRAVEL patches deep
-          if (y <= 20 && hash(wx * 13 + y, wz * 9 + y) < 0.018) chunk.setVoxel(x, y, z, BlockType.GRAVEL);
+          if (y <= 16 && hash(wx * 13 + y, wz * 9 + y) < 0.018) chunk.setVoxel(x, y, z, BlockType.GRAVEL);
         }
       }
     }

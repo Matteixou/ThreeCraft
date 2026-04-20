@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BlockType } from './Voxel.js';
+import { BlockType, ItemType } from './Voxel.js';
 
 const T    = 16;
 const COLS = 16;
@@ -52,6 +52,32 @@ export const TileId = {
   TNT_SIDE:        43,
   TNT_TOP:         44,
   GLOWSTONE_T:     45,
+  // Item sprites
+  COAL_ITEM:       46,
+  IRON_INGOT:      47,
+  GOLD_INGOT:      48,
+  DIAMOND_ITEM:    49,
+  STICK_ITEM:      50,
+  SWORD_WOOD_T:    51,
+  SWORD_STONE_T:   52,
+  SWORD_IRON_T:    53,
+  SWORD_DIA_T:     54,
+  PICK_WOOD_T:     55,
+  PICK_STONE_T:    56,
+  PICK_IRON_T:     57,
+  PICK_DIA_T:      58,
+  HELMET_IRON_T:   59,
+  CHEST_IRON_T:    60,
+  LEGS_IRON_T:     61,
+  BOOTS_IRON_T:    62,
+  HELMET_DIA_T:    63,
+  CHEST_DIA_T:     64,
+  LEGS_DIA_T:      65,
+  BOOTS_DIA_T:     66,
+  RAW_BEEF_T:      67,
+  COOKED_BEEF_T:   68,
+  FEATHER_T:       69,
+  BONE_T:          70,
 };
 
 export function tileUV(id) {
@@ -112,8 +138,33 @@ export function getBlockTile(blockType, faceIdx) {
     case BlockType.TNT:
       return (faceIdx === 2 || faceIdx === 3) ? TileId.TNT_TOP : TileId.TNT_SIDE;
     case BlockType.GLOWSTONE:      return TileId.GLOWSTONE_T;
-    case 100: return TileId.APPLE_T;
-    case 101: return TileId.BREAD_T;
+    case ItemType.APPLE:       return TileId.APPLE_T;
+    case ItemType.BREAD:       return TileId.BREAD_T;
+    case ItemType.COAL:        return TileId.COAL_ITEM;
+    case ItemType.IRON_INGOT:  return TileId.IRON_INGOT;
+    case ItemType.GOLD_INGOT:  return TileId.GOLD_INGOT;
+    case ItemType.DIAMOND:     return TileId.DIAMOND_ITEM;
+    case ItemType.STICK:       return TileId.STICK_ITEM;
+    case ItemType.SWORD_WOOD:  return TileId.SWORD_WOOD_T;
+    case ItemType.SWORD_STONE: return TileId.SWORD_STONE_T;
+    case ItemType.SWORD_IRON:  return TileId.SWORD_IRON_T;
+    case ItemType.SWORD_DIA:   return TileId.SWORD_DIA_T;
+    case ItemType.PICK_WOOD:   return TileId.PICK_WOOD_T;
+    case ItemType.PICK_STONE:  return TileId.PICK_STONE_T;
+    case ItemType.PICK_IRON:   return TileId.PICK_IRON_T;
+    case ItemType.PICK_DIA:    return TileId.PICK_DIA_T;
+    case ItemType.HELMET_IRON: return TileId.HELMET_IRON_T;
+    case ItemType.CHEST_IRON:  return TileId.CHEST_IRON_T;
+    case ItemType.LEGS_IRON:   return TileId.LEGS_IRON_T;
+    case ItemType.BOOTS_IRON:  return TileId.BOOTS_IRON_T;
+    case ItemType.HELMET_DIA:  return TileId.HELMET_DIA_T;
+    case ItemType.CHEST_DIA:   return TileId.CHEST_DIA_T;
+    case ItemType.LEGS_DIA:    return TileId.LEGS_DIA_T;
+    case ItemType.BOOTS_DIA:   return TileId.BOOTS_DIA_T;
+    case ItemType.RAW_BEEF:    return TileId.RAW_BEEF_T;
+    case ItemType.COOKED_BEEF: return TileId.COOKED_BEEF_T;
+    case ItemType.FEATHER:     return TileId.FEATHER_T;
+    case ItemType.BONE:        return TileId.BONE_T;
     default:  return TileId.DIRT;
   }
 }
@@ -552,6 +603,188 @@ function drawGlowstone(d) {
   }
 }
 
+// ── Item sprite drawers ───────────────────────────────────────────────────────
+
+function drawCoalItem(d) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const dx=x-8, dy=y-8, r=rnd(x,y,90);
+    if (dx*dx*1.1+dy*dy < 24+r*5) px(d,x,y, K(32+r*14), K(28+r*10), K(26+r*10));
+    else px(d,x,y,0,0,0,0);
+  }
+}
+
+function drawIngot(d, seed, rC, gC, bC) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const v=rnd(x,y,seed);
+    // Notched ingot: wide in middle, narrow at top/bottom edges
+    const half = T/2, dx = Math.abs(x - half + 0.5);
+    const topW=4, midW=7;
+    const w = y<3||y>12 ? topW : midW;
+    const ox=(T-w*2)/2;
+    if (y>=2&&y<=13&&x>=ox&&x<T-ox) {
+      const highlight=(y<=4)?12:0, shade=(y>=11)?-18:0;
+      px(d,x,y, K(rC+v*20+highlight+shade), K(gC+v*16+highlight+shade), K(bC+v*14+shade));
+    } else px(d,x,y,0,0,0,0);
+  }
+}
+function drawIronIngot(d)  { drawIngot(d, 91, 165, 165, 175); }
+function drawGoldIngot(d)  { drawIngot(d, 92, 220, 185, 30);  }
+
+function drawDiamondItem(d) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const v=rnd(x,y,93);
+    const cx=8, cy=8;
+    const dx=Math.abs(x-cx), dy=Math.abs(y-cy);
+    // Diamond shape: rhombus
+    if (dx+dy <= 6) {
+      const facet = (x<cx&&y<cy)||(x>=cx&&y>=cy) ? 1 : 0;
+      const base=facet ? 30 : 0;
+      px(d,x,y, K(30+base+v*15), K(200+base+v*25), K(215+v*30));
+    } else px(d,x,y,0,0,0,0);
+  }
+}
+
+function drawStickItem(d) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const v=rnd(x,y,94);
+    // Diagonal stick: x = 13-y (top-right to bottom-left)
+    const cx = 13 - y;
+    if (Math.abs(x - cx) <= 1) px(d,x,y, K(120+v*22), K(78+v*16), K(36+v*10));
+    else px(d,x,y,0,0,0,0);
+  }
+}
+
+function drawSword(d, seed, rB, gB, bB) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const v=rnd(x,y,seed);
+    // Diagonal blade: top-right to center
+    const blade_cx = 12 - y;
+    const guard_y = 8, guard_x = 4;
+    const handle_cx = 12 - y - 4;
+    // Blade (upper half)
+    if (y <= 7 && Math.abs(x - blade_cx) <= 1) {
+      const shine=(x===blade_cx+1)?25:0;
+      px(d,x,y, K(rB+v*15+shine), K(gB+v*12+shine), K(bB+v*10+shine));
+    }
+    // Guard (cross piece at middle)
+    else if (y === guard_y && x >= guard_x && x <= guard_x+6) px(d,x,y, 100,80,50);
+    // Handle (lower diagonal)
+    else if (y > guard_y && y <= 13 && Math.abs(x - handle_cx) <= 1) {
+      px(d,x,y, 110, 70, 30);
+    }
+    else px(d,x,y,0,0,0,0);
+  }
+}
+function drawSwordWood(d)  { drawSword(d, 95, 155, 105, 50);  }
+function drawSwordStone(d) { drawSword(d, 96, 130, 130, 130); }
+function drawSwordIron(d)  { drawSword(d, 97, 185, 185, 195); }
+function drawSwordDia(d)   { drawSword(d, 98, 40,  200, 215); }
+
+function drawPickaxe(d, seed, rB, gB, bB) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const v=rnd(x,y,seed);
+    // Horizontal head at top, handle goes diagonal down-right
+    const head_y = 5;
+    const handle_cx = 2 + (y - head_y);
+    // Head
+    if (y <= head_y && y >= 3 && x >= 1 && x <= 13) {
+      const tip=(x<=2||x>=12);
+      px(d,x,y, K(rB+v*15+(tip?20:0)), K(gB+v*12+(tip?15:0)), K(bB+v*10));
+    }
+    // Handle
+    else if (y > head_y && y <= 13 && Math.abs(x - handle_cx) <= 1) {
+      px(d,x,y, 110, 72, 34);
+    }
+    else px(d,x,y,0,0,0,0);
+  }
+}
+function drawPickWood(d)  { drawPickaxe(d, 99,  155, 105, 50);  }
+function drawPickStone(d) { drawPickaxe(d, 100, 130, 130, 130); }
+function drawPickIron(d)  { drawPickaxe(d, 101, 185, 185, 195); }
+function drawPickDia(d)   { drawPickaxe(d, 102, 40,  200, 215); }
+
+function drawArmor(d, seed, rB, gB, bB, shape) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const v=rnd(x,y,seed);
+    let inside = false;
+    if (shape === 'helmet') {
+      // Arc shape: dome top + neck opening bottom
+      const dx=x-7.5, dy=y-7;
+      inside = (dx*dx/36 + Math.max(0,dy)*Math.max(0,dy)/25 < 1 && y<=11) || (y>=9&&y<=13&&x>=4&&x<=11);
+    } else if (shape === 'chest') {
+      // Rectangle with shoulder cutouts
+      inside = y>=2&&y<=13&&x>=2&&x<=13 && !(y<=5&&(x<=3||x>=12));
+    } else if (shape === 'legs') {
+      // Inverted V: two leg columns
+      inside = (y>=2&&y<=13&&x>=1&&x<=6) || (y>=2&&y<=13&&x>=9&&x<=14);
+    } else if (shape === 'boots') {
+      // L shape bottom
+      inside = (y>=8&&y<=15&&x>=2&&x<=7) || (y>=12&&y<=15&&x>=2&&x<=13);
+    }
+    if (inside) {
+      const shade=(x===2||x===13)?-20:0;
+      px(d,x,y, K(rB+v*18+shade), K(gB+v*15+shade), K(bB+v*12+shade));
+    } else px(d,x,y,0,0,0,0);
+  }
+}
+function drawHelmetIron(d)  { drawArmor(d, 103, 165, 165, 175, 'helmet'); }
+function drawChestIron(d)   { drawArmor(d, 104, 165, 165, 175, 'chest');  }
+function drawLegsIron(d)    { drawArmor(d, 105, 165, 165, 175, 'legs');   }
+function drawBootsIron(d)   { drawArmor(d, 106, 165, 165, 175, 'boots');  }
+function drawHelmetDia(d)   { drawArmor(d, 107, 35,  195, 210, 'helmet'); }
+function drawChestDia(d)    { drawArmor(d, 108, 35,  195, 210, 'chest');  }
+function drawLegsDia(d)     { drawArmor(d, 109, 35,  195, 210, 'legs');   }
+function drawBootsDia(d)    { drawArmor(d, 110, 35,  195, 210, 'boots');  }
+
+function drawRawBeef(d) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const v=rnd(x,y,111), v2=rnd(x,y,112);
+    const dx=x-7.5, dy=y-8;
+    if (dx*dx*0.8+dy*dy < 28+v*6) {
+      const fat=v2>0.75;
+      px(d,x,y, fat?K(220+v*20):K(185+v*30), fat?K(170+v*15):K(60+v*20), fat?K(140+v*10):K(60+v*15));
+    } else px(d,x,y,0,0,0,0);
+  }
+}
+
+function drawCookedBeef(d) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const v=rnd(x,y,113), v2=rnd(x,y,114);
+    const dx=x-7.5, dy=y-8;
+    if (dx*dx*0.8+dy*dy < 28+v*6) {
+      const dark=v2>0.80?-20:0;
+      px(d,x,y, K(140+v*28+dark), K(72+v*18+dark), K(30+v*10+dark));
+    } else px(d,x,y,0,0,0,0);
+  }
+}
+
+function drawFeather(d) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const v=rnd(x,y,115);
+    // Diagonal feather from top-right to bottom-left
+    const cx = 12 - y;
+    const wing = Math.abs(x - cx) <= (y < 8 ? 3-y/4 : 1);
+    const quill = Math.abs(x - cx) <= 0.5;
+    if (quill)      px(d,x,y, K(200+v*40), K(200+v*40), K(200+v*40));
+    else if (wing)  px(d,x,y, K(230+v*20), K(230+v*20), K(235+v*15));
+    else            px(d,x,y,0,0,0,0);
+  }
+}
+
+function drawBone(d) {
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const v=rnd(x,y,116);
+    // Diagonal shaft with balls at ends
+    const cx = 12 - y;
+    const onShaft = Math.abs(x - cx) <= 1 && y >= 3 && y <= 12;
+    // End knobs
+    const knob1 = (x-cx)*(x-cx)+(y-2)*(y-2) < 5;
+    const knob2 = (x-cx)*(x-cx)+(y-13)*(y-13) < 5;
+    if (onShaft || knob1 || knob2) px(d,x,y, K(220+v*28), K(210+v*22), K(190+v*18));
+    else px(d,x,y,0,0,0,0);
+  }
+}
+
 // DRAWERS array: index = TileId
 const DRAWERS = [
   drawGrassTop, drawGrassSide, drawDirt, drawStone, drawSand,     // 0-4
@@ -570,6 +803,13 @@ const DRAWERS = [
   drawPumpkinFace, drawPumpkinSide, drawPumpkinTop,                // 37-39
   drawHaySide, drawHayTop,                                         // 40-41
   drawClay, drawTntSide, drawTntTop, drawGlowstone,                // 42-45
+  // Item sprites 46-70
+  drawCoalItem, drawIronIngot, drawGoldIngot, drawDiamondItem, drawStickItem, // 46-50
+  drawSwordWood, drawSwordStone, drawSwordIron, drawSwordDia,                 // 51-54
+  drawPickWood, drawPickStone, drawPickIron, drawPickDia,                     // 55-58
+  drawHelmetIron, drawChestIron, drawLegsIron, drawBootsIron,                 // 59-62
+  drawHelmetDia, drawChestDia, drawLegsDia, drawBootsDia,                     // 63-66
+  drawRawBeef, drawCookedBeef, drawFeather, drawBone,                         // 67-70
 ];
 
 export function createTextureAtlas() {
