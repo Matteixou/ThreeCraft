@@ -137,6 +137,7 @@ const menuCanvas  = document.getElementById('menu-canvas');
 const menu = new Menu(menuCanvas, (settings) => {
   // Appliquer les paramètres graphiques
   renderer.shadowMap.enabled = settings.shadows;
+  world.renderDist = settings.renderDistance;
   if (!settings.fog) scene.fog = null;
   menu.destroy();
   menuOverlay.style.display = 'none';

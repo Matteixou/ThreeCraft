@@ -24,9 +24,10 @@ function hash(x, z) {
 
 export class World {
   constructor(scene, seed = 42) {
-    this.scene  = scene;
-    this.chunks = new Map();
-    this.noise  = new NoiseGenerator(seed);
+    this.scene      = scene;
+    this.chunks     = new Map();
+    this.noise      = new NoiseGenerator(seed);
+    this.renderDist = 3;
 
     // Atlas de textures partagé entre tous les chunks
     this.atlas    = createTextureAtlas();
@@ -400,7 +401,7 @@ export class World {
   }
 
   update(playerPos) {
-    const RENDER_DIST = 3;
+    const RENDER_DIST = this.renderDist;
     const pcx = Math.floor(playerPos.x / CHUNK_SIZE);
     const pcz = Math.floor(playerPos.z / CHUNK_SIZE);
 
