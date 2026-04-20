@@ -3,7 +3,7 @@ import { BlockType } from './Voxel.js';
 import { getBlockTile, tileUV } from './TextureAtlas.js';
 
 export const CHUNK_SIZE   = 16;
-export const CHUNK_HEIGHT = 64;
+export const CHUNK_HEIGHT = 48;
 
 // Les 6 faces : normale + 4 coins (coordonnées 0/1 locales au bloc)
 const FACES = [

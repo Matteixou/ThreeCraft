@@ -18,7 +18,7 @@ export class Player {
     this.input  = input;
 
     // position = bas des pieds
-    this.position = new THREE.Vector3(8, 70, 8);
+    this.position = new THREE.Vector3(8, 50, 8);
     this.velocity = new THREE.Vector3();
     this.onGround = false;
     this.yaw      = 0;
@@ -194,7 +194,7 @@ export class Player {
   _die() {
     this.health = this.maxHealth;
     this.hunger = this.maxHunger;
-    this.position.set(8, 70, 8);
+    this.position.set(8, 50, 8);
     this.velocity.set(0, 0, 0);
   }
 
