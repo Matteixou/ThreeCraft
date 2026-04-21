@@ -10,6 +10,7 @@ const GRAVITY         = -28;
 const JUMP_FORCE      = 9;
 const MOVE_SPEED      = 5.5;
 const MOUSE_SENS      = 0.002;
+const WATER_Y         = 13.0;
 
 export class Player {
   constructor(camera, world, input) {
@@ -21,6 +22,7 @@ export class Player {
     this.position = new THREE.Vector3(8, 50, 8);
     this.velocity = new THREE.Vector3();
     this.onGround = false;
+    this.inWater  = false;
     this.yaw      = 0;
     this.pitch    = 0;
     this.health    = 20;
@@ -60,20 +62,31 @@ export class Player {
     const len = Math.sqrt(vx * vx + vz * vz);
     if (len > 0) { vx /= len; vz /= len; }
 
-    this.velocity.x = vx * MOVE_SPEED;
-    this.velocity.z = vz * MOVE_SPEED;
+    const speedMult = this.inWater ? 0.55 : 1.0;
+    this.velocity.x = vx * MOVE_SPEED * speedMult;
+    this.velocity.z = vz * MOVE_SPEED * speedMult;
 
-    if (this.input.isKeyDown('Space') && this.onGround) {
-      this.velocity.y = JUMP_FORCE;
-      this.onGround   = false;
+    if (this.input.isKeyDown('Space')) {
+      if (this.inWater) {
+        this.velocity.y = 4.0; // nager vers le haut
+      } else if (this.onGround) {
+        this.velocity.y = JUMP_FORCE;
+        this.onGround   = false;
+      }
     }
   }
 
   _physics(dt) {
-    // Gravité toujours active (même au sol — force minime pour maintenir le contact)
-    this.velocity.y += GRAVITY * dt;
-    this.velocity.y  = Math.max(this.velocity.y, -50);
-    this.onGround    = false;
+    this.inWater = (this.position.y + EYE_OFFSET * 0.5) < WATER_Y;
+
+    if (this.inWater) {
+      // Gravité réduite en eau, vitesse de chute limitée
+      this.velocity.y = Math.max(this.velocity.y + GRAVITY * 0.12 * dt, -3);
+    } else {
+      this.velocity.y += GRAVITY * dt;
+      this.velocity.y  = Math.max(this.velocity.y, -50);
+    }
+    this.onGround = false;
 
     this.position.x += this.velocity.x * dt;
     this._resolveX();
@@ -84,7 +97,7 @@ export class Player {
     const _preVelY = this.velocity.y;
     this.position.y += this.velocity.y * dt;
     this._resolveY();
-    if (this.onGround && _preVelY < -12) {
+    if (this.onGround && _preVelY < -12 && !this.inWater) {
       this.takeDamage(Math.floor((-_preVelY - 12) * 1.5));
     }
   }

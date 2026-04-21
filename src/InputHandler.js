@@ -27,7 +27,8 @@ export class InputHandler {
     document.addEventListener('contextmenu', e => e.preventDefault());
   }
 
-  isKeyDown(code) { return !!this.keys[code]; }
+  isKeyDown(code)        { return !!this.keys[code]; }
+  isMouseButtonDown(btn) { return !!this.mouseButtons[btn]; }
 
   // Consomme le delta souris accumulé depuis la dernière frame
   consumeMouseDelta() {

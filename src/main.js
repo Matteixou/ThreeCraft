@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { World } from './World.js';
 import { Player } from './Player.js';
 import { InputHandler } from './InputHandler.js';
-import { BlockType, ItemType, BlockName, BlockColor, isBlock, isFood, FOOD_DATA, BLOCK_DROPS } from './Voxel.js';
+import { BlockType, ItemType, BlockName, BlockColor, isBlock, isFood, isWeapon, FOOD_DATA, BLOCK_DROPS, WEAPON_DATA } from './Voxel.js';
+import { MobManager } from './Mobs.js';
 import { CHUNK_SIZE, CHUNK_HEIGHT } from './Chunk.js';
 import { getBlockTile } from './TextureAtlas.js';
 import { CloudSystem } from './Clouds.js';
@@ -117,6 +118,50 @@ inventory.slots[20] = { type: ItemType.STICK,             count: 16 };
 inventory.slots[21] = { type: ItemType.SWORD_IRON,        count: 1  };
 inventory.slots[22] = { type: ItemType.PICK_STONE,        count: 1  };
 inventory.slots[23] = { type: ItemType.CHEST_IRON,        count: 1  };
+
+// ── Temps de cassage par type de bloc (secondes) ─────────────────────────────
+const BREAK_TIME = new Map([
+  [BlockType.OBSIDIAN,      15.0],
+  [BlockType.DIAMOND_ORE,    5.0],
+  [BlockType.IRON_ORE,       4.0],
+  [BlockType.GOLD_ORE,       4.0],
+  [BlockType.COAL_ORE,       3.0],
+  [BlockType.STONE,          3.0],
+  [BlockType.COBBLESTONE,    3.0],
+  [BlockType.GRAVEL,         1.5],
+  [BlockType.SAND,           1.0],
+  [BlockType.WOOD,           2.5],
+  [BlockType.PLANKS,         2.0],
+  [BlockType.BOOKSHELF,      2.5],
+  [BlockType.LEAVES,         0.4],
+  [BlockType.GLASS,          0.5],
+  [BlockType.HAY_BALE,       1.5],
+  [BlockType.CLAY,           1.2],
+  [BlockType.BRICK,          3.5],
+]);
+function getBreakTime(type) { return BREAK_TIME.get(type) ?? 0.9; }
+
+// État de cassage en cours
+let breakTarget   = null; // { x, y, z }
+let breakProgress = 0;
+let lmbWasDown    = false;
+
+// ── Aperçu fantôme du bloc à poser ───────────────────────────────────────────
+const ghostMat  = new THREE.MeshBasicMaterial({
+  color: 0xffffff, transparent: true, opacity: 0.28,
+  depthTest: true, depthWrite: false,
+});
+const ghostMesh = new THREE.Mesh(new THREE.BoxGeometry(1.002, 1.002, 1.002), ghostMat);
+ghostMesh.visible = false;
+scene.add(ghostMesh);
+
+// ── Mobs ──────────────────────────────────────────────────────────────────────
+const mobManager = new MobManager(scene, world);
+
+// ── Références HUD supplémentaires ───────────────────────────────────────────
+const breakBarEl   = document.getElementById('break-bar');
+const breakBarFill = document.getElementById('break-bar-fill');
+const waterOverlay = document.getElementById('water-overlay');
 
 // ── Plan d'eau (niveau de mer y=12.9) ────────────────────────────────────────
 const waterMat  = new THREE.MeshLambertMaterial({ color: 0x2a6fcf, transparent: true, opacity: 0.72 });
@@ -880,8 +925,9 @@ function loop(now) {
     waterMesh.position.z = player.position.z;
     updateDayNight(dt);
 
-    interactCooldown -= dt;
     const hit = world.raycast(camera.position, player.getCameraDirection());
+    const sel = inventory.getSelected();
+    const camDir = player.getCameraDirection();
 
     if (hit) {
       selectionBox.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
@@ -890,46 +936,102 @@ function loop(now) {
       selectionBox.visible = false;
     }
 
-    if (interactCooldown <= 0 && hit) {
-      const sel = inventory.getSelected();
+    // ── Aperçu du bloc à poser (fantôme transparent) ─────────────────────────
+    ghostMesh.visible = false;
+    if (hit && sel && isBlock(sel.type)) {
+      const gx = hit.x + hit.face[0];
+      const gy = hit.y + hit.face[1];
+      const gz = hit.z + hit.face[2];
+      if (gy >= 0 && !collidesWithPlayer(gx, gy, gz)) {
+        ghostMesh.position.set(gx + 0.5, gy + 0.5, gz + 0.5);
+        ghostMat.color.setHex(BlockColor[sel.type] ?? 0xffffff);
+        ghostMesh.visible = true;
+      }
+    }
 
-      if (input.consumeMouseButton(0)) {
-        // Casser bloc → ajouter le drop à l'inventaire
-        const broken = world.getVoxelWorld(hit.x, hit.y, hit.z);
+    // ── Clic gauche unique : attaque mob ─────────────────────────────────────
+    const lmbDown     = input.isMouseButtonDown(0);
+    const lmbJustDown = lmbDown && !lmbWasDown;
+    lmbWasDown        = lmbDown;
+
+    if (lmbJustDown) {
+      const hitMob = mobManager.findHitMob(camera.position, camDir, hit);
+      if (hitMob) {
+        const dmg = sel && isWeapon(sel.type) ? WEAPON_DATA[sel.type].damage : 2;
+        hitMob.takeDamage(dmg);
+        triggerArmSwing();
+      }
+    }
+
+    // ── Maintien clic gauche : casser un bloc ─────────────────────────────────
+    if (lmbDown && hit) {
+      const sameTarget = breakTarget
+        && breakTarget.x === hit.x && breakTarget.y === hit.y && breakTarget.z === hit.z;
+      if (!sameTarget) { breakTarget = { x: hit.x, y: hit.y, z: hit.z }; breakProgress = 0; }
+
+      const blockType = world.getVoxelWorld(hit.x, hit.y, hit.z);
+      breakProgress += dt / getBreakTime(blockType);
+      breakBarEl.style.display = 'block';
+      breakBarFill.style.width = Math.min(100, breakProgress * 100) + '%';
+
+      if (breakProgress >= 1) {
         world.setVoxelWorld(hit.x, hit.y, hit.z, BlockType.AIR);
-        if (broken !== BlockType.AIR) {
-          const drop = BLOCK_DROPS[broken];
+        if (blockType === BlockType.TNT) {
+          explodeTNT(hit.x, hit.y, hit.z);
+        } else if (blockType !== BlockType.AIR) {
+          const drop = BLOCK_DROPS[blockType];
           if (drop) inventory.add(drop.type, drop.count);
-          else      inventory.add(broken);
+          else      inventory.add(blockType);
         }
         rebuildAround(hit.x, hit.z);
-        interactCooldown = 0.15;
         triggerArmSwing();
         updateHUD();
-      } else if (input.consumeMouseButton(2)) {
-        if (sel && isFood(sel.type)) {
-          // Manger la nourriture
-          player.eat(FOOD_DATA[sel.type].restore);
+        breakTarget = null; breakProgress = 0;
+        breakBarEl.style.display = 'none';
+        breakBarFill.style.width = '0%';
+      }
+    } else {
+      if (breakTarget) {
+        breakTarget = null; breakProgress = 0;
+        breakBarEl.style.display = 'none';
+        breakBarFill.style.width = '0%';
+      }
+    }
+
+    // ── Clic droit : manger / poser ───────────────────────────────────────────
+    interactCooldown -= dt;
+    if (interactCooldown <= 0 && hit && input.consumeMouseButton(2)) {
+      if (sel && isFood(sel.type)) {
+        player.eat(FOOD_DATA[sel.type].restore);
+        inventory.consume(inventory.selected, 1);
+        interactCooldown = 0.25;
+        triggerArmSwing();
+        updateHUD();
+      } else if (sel && isBlock(sel.type)) {
+        const nx = hit.x + hit.face[0];
+        const ny = hit.y + hit.face[1];
+        const nz = hit.z + hit.face[2];
+        if (!collidesWithPlayer(nx, ny, nz)) {
+          world.setVoxelWorld(nx, ny, nz, sel.type);
           inventory.consume(inventory.selected, 1);
-          interactCooldown = 0.15;
+          rebuildAround(nx, nz);
+          interactCooldown = 0.25;
           triggerArmSwing();
           updateHUD();
-        } else if (sel && isBlock(sel.type)) {
-          // Poser un bloc
-          const px = hit.x + hit.face[0];
-          const py = hit.y + hit.face[1];
-          const pz = hit.z + hit.face[2];
-          if (!collidesWithPlayer(px, py, pz)) {
-            world.setVoxelWorld(px, py, pz, sel.type);
-            inventory.consume(inventory.selected, 1);
-            rebuildAround(px, pz);
-            interactCooldown = 0.15;
-            triggerArmSwing();
-            updateHUD();
-          }
         }
       }
     }
+
+    // ── Mobs : mise à jour, drops, attaques ───────────────────────────────────
+    const mobDrops = mobManager.update(dt, player.position, timeOfDay);
+    for (const drop of mobDrops) inventory.add(drop, 1);
+    if (mobDrops.length > 0) updateHUD();
+
+    const mobDmg = mobManager.getMobAttackDamage(player.position);
+    if (mobDmg > 0) { player.takeDamage(mobDmg); updateHUD(); }
+
+    // ── Overlay eau ───────────────────────────────────────────────────────────
+    waterOverlay.style.display = player.inWater ? 'block' : 'none';
 
     updateArm(dt);
     drawMinimap();
@@ -941,7 +1043,8 @@ function loop(now) {
     const totalH = timeOfDay * 24;
     const hh = Math.floor(totalH) % 24;
     const mm = Math.floor((totalH % 1) * 60);
-    debugEl.textContent = `pos: ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}  |  ${String(hh).padStart(2,'0')}h${String(mm).padStart(2,'0')}`;
+    const mobCount = mobManager.mobs.length;
+    debugEl.textContent = `pos: ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}  |  ${String(hh).padStart(2,'0')}h${String(mm).padStart(2,'0')}${mobCount > 0 ? `  |  mobs: ${mobCount}` : ''}`;
   } else if (!inventoryOpen && gameStarted) {
     overlay.style.display = 'flex';
   }
@@ -972,6 +1075,41 @@ function rebuildAround(wx, wz) {
     const c = world.getChunk(cx + dx, cz + dz);
     if (c) c.buildMesh(scene);
   }
+}
+
+function explodeTNT(cx, cy, cz) {
+  const R = 4;
+  const toRebuild = new Set();
+  for (let dy = -R; dy <= R; dy++) {
+    for (let dz = -R; dz <= R; dz++) {
+      for (let dx = -R; dx <= R; dx++) {
+        if (dx*dx + dy*dy + dz*dz > R * R + 2) continue;
+        const wx = cx + dx, wy = cy + dy, wz = cz + dz;
+        if (wy < 1 || wy >= CHUNK_HEIGHT) continue;
+        if (world.getVoxelWorld(wx, wy, wz) !== BlockType.AIR) {
+          world.setVoxelWorld(wx, wy, wz, BlockType.AIR);
+          const chX = Math.floor(wx / CHUNK_SIZE);
+          const chZ = Math.floor(wz / CHUNK_SIZE);
+          for (const [ox, oz] of [[0,0],[-1,0],[1,0],[0,-1],[0,1]])
+            toRebuild.add(`${chX+ox},${chZ+oz}`);
+        }
+      }
+    }
+  }
+  for (const key of toRebuild) {
+    const [kx, kz] = key.split(',').map(Number);
+    const c = world.getChunk(kx, kz);
+    if (c) c.buildMesh(scene);
+  }
+  // Dégâts au joueur selon la distance
+  const pd = player.position.distanceTo(new THREE.Vector3(cx + 0.5, cy + 0.5, cz + 0.5));
+  if (pd < R + 2) {
+    player.takeDamage(Math.max(1, Math.floor((R + 2 - pd) * 2.5)));
+    updateHUD();
+  }
+  // Flash orange d'explosion
+  damageFlashEl.style.background = 'rgba(255,140,0,0.75)';
+  player._damagedAt = performance.now() - 100;
 }
 
 function collidesWithPlayer(bx, by, bz) {

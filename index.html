@@ -108,6 +108,29 @@
       z-index: 20;
     }
     #inv-canvas { image-rendering: pixelated; border-radius: 6px; cursor: default; }
+
+    /* ── Barre de cassage (maintien clic gauche) ──────────────────────────── */
+    #break-bar {
+      position: fixed; bottom: calc(50% - 28px); left: 50%;
+      transform: translateX(-50%);
+      width: 110px; height: 7px;
+      background: rgba(0,0,0,0.65);
+      border: 1px solid rgba(255,255,255,0.28);
+      border-radius: 4px;
+      display: none; pointer-events: none; z-index: 6;
+    }
+    #break-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #b03030, #ff6060);
+      border-radius: 3px; width: 0%;
+    }
+
+    /* ── Overlay sous-marin ───────────────────────────────────────────────── */
+    #water-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0, 40, 180, 0.22);
+      pointer-events: none; z-index: 4; display: none;
+    }
   </style>
 </head>
 <body>
@@ -124,8 +147,10 @@
 
   <!-- HUD éléments -->
   <div id="vignette"></div>
+  <div id="water-overlay"></div>
   <div id="damage-flash"></div>
   <div id="crosshair"></div>
+  <div id="break-bar"><div id="break-bar-fill"></div></div>
   <canvas id="bars"></canvas>
   <canvas id="hotbar"></canvas>
   <div id="hud">—</div>
