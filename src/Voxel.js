@@ -61,6 +61,7 @@ export const ItemType = {
   COOKED_BEEF: 124,
   FEATHER:     125,
   BONE:        126,
+  CHARCOAL:    127,
 };
 
 export const BlockColor = {
@@ -158,6 +159,7 @@ export const BlockName = {
   [ItemType.COOKED_BEEF]:     'Bœuf cuit',
   [ItemType.FEATHER]:         'Plume',
   [ItemType.BONE]:            'Os',
+  [ItemType.CHARCOAL]:        'Charbon de bois',
 };
 
 export const PLACEABLE_BLOCKS = [

@@ -165,6 +165,7 @@ export function getBlockTile(blockType, faceIdx) {
     case ItemType.COOKED_BEEF: return TileId.COOKED_BEEF_T;
     case ItemType.FEATHER:     return TileId.FEATHER_T;
     case ItemType.BONE:        return TileId.BONE_T;
+    case ItemType.CHARCOAL:    return TileId.COAL_ITEM;
     default:  return TileId.DIRT;
   }
 }

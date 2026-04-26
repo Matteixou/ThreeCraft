@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { World } from './World.js';
 import { Player } from './Player.js';
 import { InputHandler } from './InputHandler.js';
-import { BlockType, ItemType, BlockName, BlockColor, isBlock, isFood, isWeapon, FOOD_DATA, BLOCK_DROPS, WEAPON_DATA } from './Voxel.js';
+import { BlockType, ItemType, BlockName, BlockColor, isBlock, isFood, isWeapon, isArmor, FOOD_DATA, BLOCK_DROPS, WEAPON_DATA, ARMOR_DATA } from './Voxel.js';
 import { MobManager } from './Mobs.js';
 import { CHUNK_SIZE, CHUNK_HEIGHT } from './Chunk.js';
 import { getBlockTile } from './TextureAtlas.js';
@@ -158,6 +158,159 @@ scene.add(ghostMesh);
 // ── Mobs ──────────────────────────────────────────────────────────────────────
 const mobManager = new MobManager(scene, world);
 
+// ── Suivi des modifications monde (pour sauvegarde) ──────────────────────────
+const worldChanges        = new Map(); // 'x,y,z' → BlockType
+const pendingWorldChanges = [];        // changes to replay when chunk loads
+
+function setWorldVoxel(x, y, z, type) {
+  worldChanges.set(`${x},${y},${z}`, type);
+  world.setVoxelWorld(x, y, z, type);
+}
+
+function applyPendingWorldChanges() {
+  if (!pendingWorldChanges.length) return;
+  const still = [];
+  for (const { x, y, z, type } of pendingWorldChanges) {
+    const cx = Math.floor(x / CHUNK_SIZE);
+    const cz = Math.floor(z / CHUNK_SIZE);
+    if (world.getChunk(cx, cz)) {
+      world.setVoxelWorld(x, y, z, type);
+      rebuildAround(x, z);
+    } else {
+      still.push({ x, y, z, type });
+    }
+  }
+  pendingWorldChanges.length = 0;
+  pendingWorldChanges.push(...still);
+}
+
+// ── Armure équipée ─────────────────────────────────────────────────────────────
+const equipment = { helmet: null, chest: null, legs: null, boots: null };
+const ARMOR_SLOT_MAP = {
+  [ItemType.HELMET_IRON]: 'helmet', [ItemType.HELMET_DIA]: 'helmet',
+  [ItemType.CHEST_IRON]:  'chest',  [ItemType.CHEST_DIA]:  'chest',
+  [ItemType.LEGS_IRON]:   'legs',   [ItemType.LEGS_DIA]:   'legs',
+  [ItemType.BOOTS_IRON]:  'boots',  [ItemType.BOOTS_DIA]:  'boots',
+};
+const EQUIP_KEYS   = ['helmet', 'chest', 'legs', 'boots'];
+const EQUIP_LABELS = ['Casque', 'Plastron', 'Jambières', 'Bottes'];
+
+function getArmorPoints() {
+  return EQUIP_KEYS.reduce((s, k) => s + (equipment[k] ? (ARMOR_DATA[equipment[k].type]?.defense ?? 0) : 0), 0);
+}
+
+// ── Particules de cassage ─────────────────────────────────────────────────────
+const PARTICLE_MAX  = 200;
+const _pGeo  = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+const _pMat  = new THREE.MeshBasicMaterial();
+const particleMesh = new THREE.InstancedMesh(_pGeo, _pMat, PARTICLE_MAX);
+particleMesh.frustumCulled = false;
+particleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+{ const tmp = new THREE.Color(1, 1, 1); for (let i = 0; i < PARTICLE_MAX; i++) particleMesh.setColorAt(i, tmp); }
+scene.add(particleMesh);
+const _pDummy = new THREE.Object3D();
+const _pZero  = new THREE.Matrix4().makeScale(0, 0, 0);
+for (let i = 0; i < PARTICLE_MAX; i++) particleMesh.setMatrixAt(i, _pZero);
+particleMesh.instanceMatrix.needsUpdate = true;
+let particles = [];
+const _pColor = new THREE.Color();
+
+function spawnParticles(wx, wy, wz, hexColor) {
+  const c = new THREE.Color(hexColor ?? 0x888888);
+  for (let i = 0; i < 8; i++) {
+    if (particles.length >= PARTICLE_MAX) break;
+    particles.push({
+      x: wx + 0.5 + (Math.random() - 0.5) * 0.7,
+      y: wy + 0.5 + (Math.random() - 0.5) * 0.7,
+      z: wz + 0.5 + (Math.random() - 0.5) * 0.7,
+      vx: (Math.random() - 0.5) * 6, vy: Math.random() * 4 + 1.5, vz: (Math.random() - 0.5) * 6,
+      life: 0.5 + Math.random() * 0.4, age: 0,
+      r: c.r, g: c.g, b: c.b,
+    });
+  }
+}
+
+function updateParticles(dt) {
+  particles = particles.filter(p => p.age < p.life);
+  const lim = Math.min(particles.length, PARTICLE_MAX);
+  for (let i = 0; i < lim; i++) {
+    const p = particles[i];
+    p.age += dt; p.vy -= 22 * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    const s = Math.max(0, 1 - p.age / p.life) * 0.12;
+    _pDummy.position.set(p.x, p.y, p.z);
+    _pDummy.scale.setScalar(s);
+    _pDummy.updateMatrix();
+    particleMesh.setMatrixAt(i, _pDummy.matrix);
+    particleMesh.setColorAt(i, _pColor.setRGB(p.r, p.g, p.b));
+  }
+  for (let i = lim; i < PARTICLE_MAX; i++) particleMesh.setMatrixAt(i, _pZero);
+  particleMesh.instanceMatrix.needsUpdate = true;
+  if (particleMesh.instanceColor) particleMesh.instanceColor.needsUpdate = true;
+}
+
+// ── Système de four ────────────────────────────────────────────────────────────
+const furnaces = new Map(); // 'x,y,z' → { fuel, input, output, progress, burnTime, burnMax }
+
+const SMELT_RECIPES = new Map([
+  [BlockType.IRON_ORE,    { type: ItemType.IRON_INGOT,  count: 1 }],
+  [BlockType.GOLD_ORE,    { type: ItemType.GOLD_INGOT,  count: 1 }],
+  [BlockType.COAL_ORE,    { type: ItemType.COAL,         count: 1 }],
+  [BlockType.SAND,        { type: BlockType.GLASS,       count: 1 }],
+  [BlockType.COBBLESTONE, { type: BlockType.STONE,       count: 1 }],
+  [BlockType.CLAY,        { type: BlockType.BRICK,       count: 1 }],
+  [ItemType.RAW_BEEF,     { type: ItemType.COOKED_BEEF,  count: 1 }],
+  [BlockType.WOOD,        { type: ItemType.CHARCOAL,     count: 1 }],
+]);
+
+const FUEL_BURN_TIME = new Map([
+  [BlockType.WOOD, 15], [BlockType.PLANKS, 15], [BlockType.BOOKSHELF, 15],
+  [ItemType.COAL, 80], [ItemType.CHARCOAL, 80], [ItemType.STICK, 5],
+]);
+
+function getFurnaceState(key) {
+  if (!furnaces.has(key)) furnaces.set(key, { fuel: null, input: null, output: null, progress: 0, burnTime: 0, burnMax: 1 });
+  return furnaces.get(key);
+}
+
+function updateFurnaces(dt) {
+  for (const [, f] of furnaces) {
+    const recipe = f.input ? SMELT_RECIPES.get(f.input.type) : null;
+    if (f.burnTime <= 0 && recipe && f.fuel) {
+      const bt = FUEL_BURN_TIME.get(f.fuel.type);
+      if (bt) { f.burnMax = bt; f.burnTime = bt; f.fuel.count--; if (!f.fuel.count) f.fuel = null; }
+    }
+    if (f.burnTime > 0) {
+      f.burnTime = Math.max(0, f.burnTime - dt);
+      if (recipe) {
+        f.progress = Math.min(1, f.progress + dt / 10);
+        if (f.progress >= 1) {
+          f.progress = 0;
+          const canOut = !f.output || (f.output.type === recipe.type && f.output.count < 64);
+          if (canOut) {
+            if (!f.output) f.output = { type: recipe.type, count: 0 };
+            f.output.count++;
+            f.input.count--;
+            if (!f.input.count) f.input = null;
+          }
+        }
+      } else {
+        f.progress = Math.max(0, f.progress - dt / 5);
+      }
+    } else {
+      f.progress = Math.max(0, f.progress - dt / 5);
+    }
+  }
+}
+
+// ── Stockage des coffres ───────────────────────────────────────────────────────
+const chests = new Map(); // 'x,y,z' → Array(27)
+
+function getChestItems(key) {
+  if (!chests.has(key)) chests.set(key, new Array(27).fill(null));
+  return chests.get(key);
+}
+
 // ── Références HUD supplémentaires ───────────────────────────────────────────
 const breakBarEl   = document.getElementById('break-bar');
 const breakBarFill = document.getElementById('break-bar-fill');
@@ -188,14 +341,20 @@ const menuOverlay = document.getElementById('menu-overlay');
 const menuCanvas  = document.getElementById('menu-canvas');
 
 const menu = new Menu(menuCanvas, (settings) => {
-  // Appliquer les paramètres graphiques
   renderer.shadowMap.enabled = settings.shadows;
   world.renderDist = settings.renderDistance;
   if (!settings.fog) scene.fog = null;
   menu.destroy();
   menuOverlay.style.display = 'none';
-  renderer.domElement.requestPointerLock();
   gameStarted = true;
+
+  // Charger la sauvegarde si elle existe
+  if (loadGame()) {
+    updateHUD();
+    showNotification('Sauvegarde chargée');
+  }
+
+  renderer.domElement.requestPointerLock();
 });
 
 // ── Pointer lock (reprise après ESC) ─────────────────────────────────────────
@@ -294,6 +453,18 @@ function handleCraftSlotClick(idx) {
     } else { [craftSlots[idx], inventory.held] = [inventory.held, craftSlots[idx]]; }
   } else if (craftSlots[idx]) {
     inventory.held = craftSlots[idx]; craftSlots[idx] = null;
+  }
+}
+
+function handleEquipSlotClick(slotName) {
+  const current = equipment[slotName];
+  if (inventory.held) {
+    if (ARMOR_SLOT_MAP[inventory.held.type] === slotName) {
+      if (current) { [equipment[slotName], inventory.held] = [inventory.held, current]; }
+      else          { equipment[slotName] = inventory.held; inventory.held = null; }
+    }
+  } else if (current) {
+    inventory.held = current; equipment[slotName] = null;
   }
 }
 
@@ -398,15 +569,20 @@ const SLOT_PX  = 50;
 const SLOT_GAP = 4;
 const SLOT_STR = SLOT_PX + SLOT_GAP; // 54
 const CHAR_W   = 130;                 // width of character preview
+// Equipment slots column (between char and craft)
+const EQ_SLOT_PX  = 44;
+const EQ_SLOT_STR = 48;
+const EQ_X        = INV_PAD + CHAR_W + 8;  // 154
 // Y zones
 const TITLE_H  = 44;
 const TOP_H    = 194;  // character+craft area height
 const TOP_Y    = TITLE_H;
+const EQ_Y     = [TOP_Y + 4, TOP_Y + 52, TOP_Y + 100, TOP_Y + 148]; // helmet,chest,legs,boots
 const GRID_Y   = TOP_Y + TOP_H + 6;
 const SEP_Y    = GRID_Y + GRID_ROWS * SLOT_STR;
 const HBAR_Y   = SEP_Y + 14;
-// Craft grid position (centered in right zone)
-const CRAFT_X  = INV_PAD + CHAR_W + 24;  // left of craft 2×2
+// Craft grid position (shifted right to make room for equipment column)
+const CRAFT_X  = EQ_X + EQ_SLOT_PX + 10;  // 208
 const CRAFT_Y  = TOP_Y + 24;
 const ARROW_X  = CRAFT_X + 2 * SLOT_STR + 6;
 const OUT_X    = ARROW_X + 28;
@@ -417,6 +593,12 @@ invCanvas.height = HBAR_Y + SLOT_PX + INV_PAD;
 
 // Returns { kind, ... } for the element under (mx, my)
 function getClickTarget(mx, my) {
+  // Equipment slots
+  for (let ei = 0; ei < 4; ei++) {
+    const ey = EQ_Y[ei];
+    if (mx >= EQ_X && mx < EQ_X + EQ_SLOT_PX && my >= ey && my < ey + EQ_SLOT_PX)
+      return { kind: 'equip', slot: EQUIP_KEYS[ei] };
+  }
   // Craft 2×2
   for (let ci = 0; ci < 4; ci++) {
     const cx = CRAFT_X + (ci % 2) * SLOT_STR;
@@ -492,6 +674,32 @@ function drawInventoryUI() {
   invCtx.imageSmoothingEnabled = false;
   invCtx.drawImage(charOffscreen, charFrameX + 1, charFrameY + 1, CHAR_W - 2, TOP_H - 10);
 
+  // ── Equipment slots ────────────────────────────────────────────────────────
+  const armorPts = getArmorPoints();
+  for (let ei = 0; ei < 4; ei++) {
+    const ex = EQ_X, ey = EQ_Y[ei];
+    const item      = equipment[EQUIP_KEYS[ei]];
+    const hovered   = invMouseX >= ex && invMouseX < ex + EQ_SLOT_PX && invMouseY >= ey && invMouseY < ey + EQ_SLOT_PX;
+    invCtx.fillStyle = hovered ? 'rgba(255,200,80,0.28)' : 'rgba(0,0,0,0.55)';
+    invCtx.fillRect(ex, ey, EQ_SLOT_PX, EQ_SLOT_PX);
+    invCtx.strokeStyle = '#aa8800'; invCtx.lineWidth = 1;
+    invCtx.strokeRect(ex + 0.5, ey + 0.5, EQ_SLOT_PX - 1, EQ_SLOT_PX - 1);
+    if (item) {
+      const tileId = getBlockTile(item.type, 2);
+      const tc = tileId % 16, tr = Math.floor(tileId / 16);
+      invCtx.imageSmoothingEnabled = false;
+      invCtx.drawImage(world.atlas.image, tc * 16, tr * 16, 16, 16, ex + 4, ey + 4, EQ_SLOT_PX - 8, EQ_SLOT_PX - 8);
+    } else {
+      invCtx.fillStyle = 'rgba(180,140,0,0.4)'; invCtx.font = '8px monospace'; invCtx.textAlign = 'center';
+      invCtx.fillText(EQUIP_LABELS[ei], ex + EQ_SLOT_PX / 2, ey + EQ_SLOT_PX / 2 + 3);
+    }
+  }
+  // Armor points total
+  if (armorPts > 0) {
+    invCtx.fillStyle = '#ffd700'; invCtx.font = 'bold 10px monospace'; invCtx.textAlign = 'center';
+    invCtx.fillText(`⚔ ${armorPts}`, EQ_X + EQ_SLOT_PX / 2, TOP_Y + TOP_H - 2);
+  }
+
   // ── Craft grid label ───────────────────────────────────────────────────────
   invCtx.fillStyle = '#ccc';
   invCtx.font = '11px monospace';
@@ -559,6 +767,7 @@ invCanvas.addEventListener('click', e => {
   if (!t) return;
   if      (t.kind === 'craft')    { handleCraftSlotClick(t.idx); computeCraft(); }
   else if (t.kind === 'craftout') { takeCraftOutput(); }
+  else if (t.kind === 'equip')    { handleEquipSlotClick(t.slot); }
   else if (t.kind === 'inv')      { inventory.clickSlot(t.uiIdx); }
   drawInventoryUI();
 });
@@ -572,6 +781,7 @@ invCanvas.addEventListener('contextmenu', e => {
   if (!t) return;
   if      (t.kind === 'craft')    { handleCraftSlotClick(t.idx); computeCraft(); }
   else if (t.kind === 'craftout') { takeCraftOutput(); }
+  else if (t.kind === 'equip')    { handleEquipSlotClick(t.slot); }
   else if (t.kind === 'inv')      { inventory.rightClickSlot(t.uiIdx); }
   drawInventoryUI();
 });
@@ -600,10 +810,354 @@ function closeInventory() {
   renderer.domElement.requestPointerLock();
 }
 
+// ── Four UI ────────────────────────────────────────────────────────────────────
+let furnaceOpen = false;
+let currentFurnaceKey = null;
+let fMouseX = 0, fMouseY = 0;
+
+const furnaceOverlay = document.createElement('div');
+furnaceOverlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;align-items:center;justify-content:center;';
+document.body.appendChild(furnaceOverlay);
+const furnaceCanvas = document.createElement('canvas');
+furnaceOverlay.appendChild(furnaceCanvas);
+const fCtx = furnaceCanvas.getContext('2d');
+
+// Furnace canvas layout
+const F_W     = INV_PAD * 2 + HOTBAR_SIZE * SLOT_STR - SLOT_GAP; // 514
+const F_TITLE = 44;
+const F_IN_X  = Math.floor(F_W / 2) - SLOT_STR - 28;  // input slot x
+const F_IN_Y  = F_TITLE + 28;
+const F_FL_X  = F_IN_X;                                 // fuel slot x (same col as input)
+const F_FL_Y  = F_IN_Y + SLOT_STR + 8;
+const F_OUT_X = F_IN_X + SLOT_STR * 3 + 10;            // output slot x
+const F_OUT_Y = F_IN_Y;
+const F_SEP_Y = F_FL_Y + SLOT_PX + 24;
+const F_GRID_Y= F_SEP_Y + 14;
+const F_SEP2_Y= F_GRID_Y + GRID_ROWS * SLOT_STR;
+const F_HBAR_Y= F_SEP2_Y + 14;
+furnaceCanvas.width  = F_W;
+furnaceCanvas.height = F_HBAR_Y + SLOT_PX + INV_PAD;
+
+function getFurnaceHitTarget(mx, my) {
+  if (mx >= F_IN_X  && mx < F_IN_X  + SLOT_PX && my >= F_IN_Y  && my < F_IN_Y  + SLOT_PX) return 'finput';
+  if (mx >= F_FL_X  && mx < F_FL_X  + SLOT_PX && my >= F_FL_Y  && my < F_FL_Y  + SLOT_PX) return 'ffuel';
+  if (mx >= F_OUT_X && mx < F_OUT_X + SLOT_PX && my >= F_OUT_Y && my < F_OUT_Y + SLOT_PX) return 'foutput';
+  for (let row = 0; row < GRID_ROWS; row++) for (let col = 0; col < HOTBAR_SIZE; col++) {
+    const x = INV_PAD + col * SLOT_STR, y = F_GRID_Y + row * SLOT_STR;
+    if (mx >= x && mx < x + SLOT_PX && my >= y && my < y + SLOT_PX) return { kind: 'inv', uiIdx: row * HOTBAR_SIZE + col };
+  }
+  for (let col = 0; col < HOTBAR_SIZE; col++) {
+    const x = INV_PAD + col * SLOT_STR;
+    if (mx >= x && mx < x + SLOT_PX && my >= F_HBAR_Y && my < F_HBAR_Y + SLOT_PX) return { kind: 'inv', uiIdx: GRID_ROWS * HOTBAR_SIZE + col };
+  }
+  return null;
+}
+
+function handleFurnaceClick(target) {
+  const f = getFurnaceState(currentFurnaceKey);
+  if (target === 'finput') {
+    if (inventory.held) {
+      if (!f.input || f.input.type === inventory.held.type) {
+        if (!f.input) f.input = { type: inventory.held.type, count: 0 };
+        const n = Math.min(inventory.held.count, 64 - f.input.count);
+        f.input.count += n; inventory.held.count -= n; if (!inventory.held.count) inventory.held = null;
+      } else { [f.input, inventory.held] = [inventory.held, f.input]; }
+    } else if (f.input) { inventory.held = f.input; f.input = null; }
+  } else if (target === 'ffuel') {
+    if (inventory.held) {
+      if (FUEL_BURN_TIME.has(inventory.held.type)) {
+        if (!f.fuel || f.fuel.type === inventory.held.type) {
+          if (!f.fuel) f.fuel = { type: inventory.held.type, count: 0 };
+          const n = Math.min(inventory.held.count, 64 - f.fuel.count);
+          f.fuel.count += n; inventory.held.count -= n; if (!inventory.held.count) inventory.held = null;
+        } else { [f.fuel, inventory.held] = [inventory.held, f.fuel]; }
+      }
+    } else if (f.fuel) { inventory.held = f.fuel; f.fuel = null; }
+  } else if (target === 'foutput') {
+    if (!inventory.held && f.output) { inventory.held = f.output; f.output = null; }
+    else if (inventory.held && f.output && inventory.held.type === f.output.type && inventory.held.count + f.output.count <= 64) {
+      inventory.held.count += f.output.count; f.output = null;
+    }
+  } else if (target?.kind === 'inv') {
+    inventory.clickSlot(target.uiIdx);
+  }
+}
+
+function drawFurnaceUI() {
+  const W = furnaceCanvas.width, H = furnaceCanvas.height;
+  fCtx.clearRect(0, 0, W, H);
+  fCtx.fillStyle = 'rgba(28,28,28,0.95)'; fCtx.fillRect(0, 0, W, H);
+
+  // Title
+  fCtx.fillStyle = '#ff9933'; fCtx.font = 'bold 16px monospace'; fCtx.textAlign = 'center';
+  fCtx.fillText('FOUR', W / 2, INV_PAD + 20);
+
+  const f = getFurnaceState(currentFurnaceKey);
+  const atlas = world.atlas.image;
+
+  // Draw a slot helper
+  const drawSlot = (x, y, item, special) => {
+    const hov = fMouseX >= x && fMouseX < x + SLOT_PX && fMouseY >= y && fMouseY < y + SLOT_PX;
+    fCtx.fillStyle = hov ? 'rgba(255,255,255,0.18)' : special ? 'rgba(200,120,0,0.25)' : 'rgba(0,0,0,0.65)';
+    fCtx.fillRect(x, y, SLOT_PX, SLOT_PX);
+    fCtx.strokeStyle = special ? '#cc6600' : (hov ? '#fff' : '#555'); fCtx.lineWidth = 1;
+    fCtx.strokeRect(x + 0.5, y + 0.5, SLOT_PX - 1, SLOT_PX - 1);
+    if (item) {
+      const tid = getBlockTile(item.type, 2), tc = tid % 16, tr = Math.floor(tid / 16);
+      fCtx.imageSmoothingEnabled = false;
+      fCtx.drawImage(atlas, tc * 16, tr * 16, 16, 16, x + 5, y + 5, SLOT_PX - 10, SLOT_PX - 10);
+      if (item.count > 1) {
+        fCtx.fillStyle = '#fff'; fCtx.font = 'bold 11px monospace'; fCtx.textAlign = 'right';
+        fCtx.fillText(item.count, x + SLOT_PX - 3, y + SLOT_PX - 3);
+      }
+    }
+  };
+
+  // Input slot
+  fCtx.fillStyle = '#aaa'; fCtx.font = '10px monospace'; fCtx.textAlign = 'center';
+  fCtx.fillText('Entrée', F_IN_X + SLOT_PX / 2, F_IN_Y - 4);
+  drawSlot(F_IN_X, F_IN_Y, f.input, false);
+
+  // Fuel slot
+  fCtx.fillStyle = '#e06020'; fCtx.font = '10px monospace'; fCtx.textAlign = 'center';
+  fCtx.fillText('Carburant', F_FL_X + SLOT_PX / 2, F_FL_Y - 4);
+  drawSlot(F_FL_X, F_FL_Y, f.fuel, true);
+  // Flame icon
+  const flamePct = f.burnTime > 0 ? f.burnTime / f.burnMax : 0;
+  fCtx.fillStyle = `rgba(255,${80 + flamePct * 120 | 0},0,${0.3 + flamePct * 0.7})`;
+  fCtx.fillRect(F_FL_X + 14, F_FL_Y + SLOT_PX + 2, 22, 8);
+  fCtx.fillStyle = '#ff4400'; fCtx.font = '14px monospace'; fCtx.textAlign = 'center';
+  fCtx.fillText('🔥', F_FL_X + SLOT_PX / 2, F_FL_Y + SLOT_PX + 18);
+
+  // Progress arrow
+  const midX = F_IN_X + SLOT_STR + 4, midY = F_IN_Y + SLOT_PX / 2;
+  fCtx.strokeStyle = '#555'; fCtx.lineWidth = 2;
+  fCtx.strokeRect(midX, midY - 7, SLOT_STR * 1.5, 14);
+  if (f.progress > 0) {
+    fCtx.fillStyle = '#44bb44';
+    fCtx.fillRect(midX + 1, midY - 6, Math.floor((SLOT_STR * 1.5 - 2) * f.progress), 12);
+  }
+  fCtx.fillStyle = '#fff'; fCtx.font = 'bold 14px monospace'; fCtx.textAlign = 'center';
+  fCtx.fillText('→', midX + SLOT_STR * 0.75, midY + 5);
+
+  // Output slot
+  fCtx.fillStyle = '#aaa'; fCtx.font = '10px monospace'; fCtx.textAlign = 'center';
+  fCtx.fillText('Sortie', F_OUT_X + SLOT_PX / 2, F_OUT_Y - 4);
+  drawSlot(F_OUT_X, F_OUT_Y, f.output, false);
+
+  // Separator
+  fCtx.strokeStyle = '#444'; fCtx.lineWidth = 1;
+  fCtx.beginPath(); fCtx.moveTo(INV_PAD, F_SEP_Y + 7); fCtx.lineTo(W - INV_PAD, F_SEP_Y + 7); fCtx.stroke();
+
+  // Player inventory
+  fCtx.fillStyle = '#ccc'; fCtx.font = '11px monospace'; fCtx.textAlign = 'left';
+  fCtx.fillText('Inventaire', INV_PAD, F_GRID_Y - 4);
+  for (let row = 0; row < GRID_ROWS; row++) for (let col = 0; col < HOTBAR_SIZE; col++) {
+    const x = INV_PAD + col * SLOT_STR, y = F_GRID_Y + row * SLOT_STR;
+    const item = inventory.slots[HOTBAR_SIZE + row * HOTBAR_SIZE + col];
+    drawInvSlot(fCtx, x, y, item, false, false);
+  }
+  fCtx.strokeStyle = '#444'; fCtx.lineWidth = 1;
+  fCtx.beginPath(); fCtx.moveTo(INV_PAD, F_SEP2_Y + 7); fCtx.lineTo(W - INV_PAD, F_SEP2_Y + 7); fCtx.stroke();
+  for (let col = 0; col < HOTBAR_SIZE; col++) {
+    const x = INV_PAD + col * SLOT_STR;
+    drawInvSlot(fCtx, x, F_HBAR_Y, inventory.slots[col], col === inventory.selected, false);
+  }
+  // Held item
+  if (inventory.held) drawInvSlot(fCtx, fMouseX - SLOT_PX / 2, fMouseY - SLOT_PX / 2, inventory.held, false, true);
+}
+
+furnaceCanvas.addEventListener('mousemove', e => {
+  const r = furnaceCanvas.getBoundingClientRect(); fMouseX = e.clientX - r.left; fMouseY = e.clientY - r.top;
+  if (furnaceOpen) drawFurnaceUI();
+});
+furnaceCanvas.addEventListener('click', e => {
+  const r = furnaceCanvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  handleFurnaceClick(getFurnaceHitTarget(mx, my)); updateHUD(); drawFurnaceUI();
+});
+furnaceCanvas.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const r = furnaceCanvas.getBoundingClientRect();
+  const t = getFurnaceHitTarget(e.clientX - r.left, e.clientY - r.top);
+  if (t?.kind === 'inv') inventory.rightClickSlot(t.uiIdx);
+  updateHUD(); drawFurnaceUI();
+});
+furnaceOverlay.addEventListener('click', e => { if (e.target === furnaceOverlay) closeFurnace(); });
+
+function openFurnace(x, y, z) {
+  currentFurnaceKey = `${x},${y},${z}`;
+  inventory.dropHeld();
+  furnaceOpen = true;
+  furnaceOverlay.style.display = 'flex';
+  drawFurnaceUI();
+  document.exitPointerLock();
+}
+function closeFurnace() {
+  inventory.dropHeld();
+  furnaceOpen = false;
+  furnaceOverlay.style.display = 'none';
+  renderer.domElement.requestPointerLock();
+}
+
+// ── Coffre UI ──────────────────────────────────────────────────────────────────
+let chestOpen = false;
+let currentChestKey = null;
+let cMouseX = 0, cMouseY = 0;
+
+const chestOverlay = document.createElement('div');
+chestOverlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;align-items:center;justify-content:center;';
+document.body.appendChild(chestOverlay);
+const chestCanvas = document.createElement('canvas');
+chestOverlay.appendChild(chestCanvas);
+const cCtx = chestCanvas.getContext('2d');
+
+const C_TITLE  = 44;
+const C_CHEST_Y = C_TITLE + 8;
+const C_SEP_Y  = C_CHEST_Y + GRID_ROWS * SLOT_STR;
+const C_GRID_Y = C_SEP_Y + 14;
+const C_SEP2_Y = C_GRID_Y + GRID_ROWS * SLOT_STR;
+const C_HBAR_Y = C_SEP2_Y + 14;
+const C_W      = INV_PAD * 2 + HOTBAR_SIZE * SLOT_STR - SLOT_GAP;
+chestCanvas.width  = C_W;
+chestCanvas.height = C_HBAR_Y + SLOT_PX + INV_PAD;
+
+function getChestHitTarget(mx, my) {
+  // Chest slots (3×9)
+  for (let row = 0; row < GRID_ROWS; row++) for (let col = 0; col < HOTBAR_SIZE; col++) {
+    const x = INV_PAD + col * SLOT_STR, y = C_CHEST_Y + row * SLOT_STR;
+    if (mx >= x && mx < x + SLOT_PX && my >= y && my < y + SLOT_PX) return { kind: 'chest', idx: row * HOTBAR_SIZE + col };
+  }
+  // Player inventory
+  for (let row = 0; row < GRID_ROWS; row++) for (let col = 0; col < HOTBAR_SIZE; col++) {
+    const x = INV_PAD + col * SLOT_STR, y = C_GRID_Y + row * SLOT_STR;
+    if (mx >= x && mx < x + SLOT_PX && my >= y && my < y + SLOT_PX) return { kind: 'inv', uiIdx: row * HOTBAR_SIZE + col };
+  }
+  for (let col = 0; col < HOTBAR_SIZE; col++) {
+    const x = INV_PAD + col * SLOT_STR;
+    if (mx >= x && mx < x + SLOT_PX && my >= C_HBAR_Y && my < C_HBAR_Y + SLOT_PX) return { kind: 'inv', uiIdx: GRID_ROWS * HOTBAR_SIZE + col };
+  }
+  return null;
+}
+
+function handleChestClick(t, rightClick) {
+  if (!t) return;
+  const items = getChestItems(currentChestKey);
+  if (t.kind === 'chest') {
+    const ci = t.idx;
+    if (rightClick) {
+      if (!inventory.held && items[ci]) {
+        const half = Math.ceil(items[ci].count / 2);
+        inventory.held = { type: items[ci].type, count: half };
+        items[ci].count -= half; if (!items[ci].count) items[ci] = null;
+      } else if (inventory.held) {
+        if (!items[ci]) { items[ci] = { type: inventory.held.type, count: 1 }; inventory.held.count--; if (!inventory.held.count) inventory.held = null; }
+        else if (items[ci].type === inventory.held.type && items[ci].count < 64) { items[ci].count++; inventory.held.count--; if (!inventory.held.count) inventory.held = null; }
+      }
+    } else {
+      if (inventory.held) {
+        if (!items[ci]) { items[ci] = inventory.held; inventory.held = null; }
+        else if (items[ci].type === inventory.held.type && items[ci].count < 64) {
+          const n = Math.min(inventory.held.count, 64 - items[ci].count);
+          items[ci].count += n; inventory.held.count -= n; if (!inventory.held.count) inventory.held = null;
+        } else { [items[ci], inventory.held] = [inventory.held, items[ci]]; }
+      } else if (items[ci]) { inventory.held = items[ci]; items[ci] = null; }
+    }
+  } else if (t.kind === 'inv') {
+    if (rightClick) inventory.rightClickSlot(t.uiIdx); else inventory.clickSlot(t.uiIdx);
+  }
+}
+
+function drawChestUI() {
+  const W = chestCanvas.width;
+  cCtx.clearRect(0, 0, W, chestCanvas.height);
+  cCtx.fillStyle = 'rgba(28,28,28,0.95)'; cCtx.fillRect(0, 0, W, chestCanvas.height);
+
+  cCtx.fillStyle = '#d4a020'; cCtx.font = 'bold 16px monospace'; cCtx.textAlign = 'center';
+  cCtx.fillText('COFFRE', W / 2, INV_PAD + 20);
+
+  const items = getChestItems(currentChestKey);
+  const atlas = world.atlas.image;
+  const drawSlot = (x, y, item, sel) => {
+    const hov = cMouseX >= x && cMouseX < x + SLOT_PX && cMouseY >= y && cMouseY < y + SLOT_PX;
+    cCtx.fillStyle = hov ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.65)';
+    cCtx.fillRect(x, y, SLOT_PX, SLOT_PX);
+    cCtx.strokeStyle = sel ? '#fff' : (hov ? '#ccc' : '#555'); cCtx.lineWidth = sel ? 2 : 1;
+    cCtx.strokeRect(x + 0.5, y + 0.5, SLOT_PX - 1, SLOT_PX - 1);
+    if (item) {
+      const tid = getBlockTile(item.type, 2), tc = tid % 16, tr = Math.floor(tid / 16);
+      cCtx.imageSmoothingEnabled = false;
+      cCtx.drawImage(atlas, tc * 16, tr * 16, 16, 16, x + 5, y + 5, SLOT_PX - 10, SLOT_PX - 10);
+      if (item.count > 1) {
+        cCtx.fillStyle = '#fff'; cCtx.font = 'bold 11px monospace'; cCtx.textAlign = 'right';
+        cCtx.fillText(item.count, x + SLOT_PX - 3, y + SLOT_PX - 3);
+      }
+    }
+  };
+
+  // Chest storage (3×9)
+  cCtx.fillStyle = '#ccc'; cCtx.font = '11px monospace'; cCtx.textAlign = 'left';
+  cCtx.fillText('Coffre', INV_PAD, C_CHEST_Y - 4);
+  for (let row = 0; row < GRID_ROWS; row++) for (let col = 0; col < HOTBAR_SIZE; col++) {
+    drawSlot(INV_PAD + col * SLOT_STR, C_CHEST_Y + row * SLOT_STR, items[row * HOTBAR_SIZE + col], false);
+  }
+
+  cCtx.strokeStyle = '#444'; cCtx.lineWidth = 1;
+  cCtx.beginPath(); cCtx.moveTo(INV_PAD, C_SEP_Y + 7); cCtx.lineTo(W - INV_PAD, C_SEP_Y + 7); cCtx.stroke();
+
+  // Player inventory
+  cCtx.fillStyle = '#ccc'; cCtx.font = '11px monospace'; cCtx.textAlign = 'left';
+  cCtx.fillText('Inventaire', INV_PAD, C_GRID_Y - 4);
+  for (let row = 0; row < GRID_ROWS; row++) for (let col = 0; col < HOTBAR_SIZE; col++) {
+    const x = INV_PAD + col * SLOT_STR, y = C_GRID_Y + row * SLOT_STR;
+    drawSlot(x, y, inventory.slots[HOTBAR_SIZE + row * HOTBAR_SIZE + col], false);
+  }
+
+  cCtx.strokeStyle = '#444'; cCtx.lineWidth = 1;
+  cCtx.beginPath(); cCtx.moveTo(INV_PAD, C_SEP2_Y + 7); cCtx.lineTo(W - INV_PAD, C_SEP2_Y + 7); cCtx.stroke();
+  for (let col = 0; col < HOTBAR_SIZE; col++) drawSlot(INV_PAD + col * SLOT_STR, C_HBAR_Y, inventory.slots[col], col === inventory.selected);
+
+  if (inventory.held) drawInvSlot(cCtx, cMouseX - SLOT_PX / 2, cMouseY - SLOT_PX / 2, inventory.held, false, true);
+}
+
+chestCanvas.addEventListener('mousemove', e => {
+  const r = chestCanvas.getBoundingClientRect(); cMouseX = e.clientX - r.left; cMouseY = e.clientY - r.top;
+  if (chestOpen) drawChestUI();
+});
+chestCanvas.addEventListener('click', e => {
+  const r = chestCanvas.getBoundingClientRect();
+  handleChestClick(getChestHitTarget(e.clientX - r.left, e.clientY - r.top), false); updateHUD(); drawChestUI();
+});
+chestCanvas.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const r = chestCanvas.getBoundingClientRect();
+  handleChestClick(getChestHitTarget(e.clientX - r.left, e.clientY - r.top), true); updateHUD(); drawChestUI();
+});
+chestOverlay.addEventListener('click', e => { if (e.target === chestOverlay) closeChest(); });
+
+function openChest(x, y, z) {
+  currentChestKey = `${x},${y},${z}`;
+  inventory.dropHeld();
+  chestOpen = true;
+  chestOverlay.style.display = 'flex';
+  drawChestUI();
+  document.exitPointerLock();
+}
+function closeChest() {
+  inventory.dropHeld();
+  chestOpen = false;
+  chestOverlay.style.display = 'none';
+  renderer.domElement.requestPointerLock();
+}
+
 document.addEventListener('keydown', e => {
   if (e.code === 'KeyE') {
     if (inventoryOpen) closeInventory();
     else if (input.isLocked) openInventory();
+  }
+  if (e.code === 'KeyE' || e.code === 'Escape') {
+    if (furnaceOpen) { closeFurnace(); return; }
+    if (chestOpen)   { closeChest();   return; }
   }
   if (e.code === 'Escape' && inventoryOpen) closeInventory();
 
@@ -909,13 +1463,14 @@ function updateDayNight(dt) {
 // ── Boucle de jeu ─────────────────────────────────────────────────────────────
 let last = 0;
 let interactCooldown = 0;
+let autoSaveTimer = 60;
 
 function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
 
-  if (input.isLocked && !inventoryOpen && gameStarted) {
+  if (input.isLocked && !inventoryOpen && !furnaceOpen && !chestOpen && gameStarted) {
     overlay.style.display = 'none';
 
     player.update(dt);
@@ -975,7 +1530,8 @@ function loop(now) {
       breakBarFill.style.width = Math.min(100, breakProgress * 100) + '%';
 
       if (breakProgress >= 1) {
-        world.setVoxelWorld(hit.x, hit.y, hit.z, BlockType.AIR);
+        setWorldVoxel(hit.x, hit.y, hit.z, BlockType.AIR);
+        spawnParticles(hit.x, hit.y, hit.z, BlockColor[blockType]);
         if (blockType === BlockType.TNT) {
           explodeTNT(hit.x, hit.y, hit.z);
         } else if (blockType !== BlockType.AIR) {
@@ -998,10 +1554,17 @@ function loop(now) {
       }
     }
 
-    // ── Clic droit : manger / poser ───────────────────────────────────────────
+    // ── Clic droit : interagir / manger / poser ───────────────────────────────
     interactCooldown -= dt;
     if (interactCooldown <= 0 && hit && input.consumeMouseButton(2)) {
-      if (sel && isFood(sel.type)) {
+      const hitBlockType = world.getVoxelWorld(hit.x, hit.y, hit.z);
+      if (hitBlockType === BlockType.FURNACE) {
+        openFurnace(hit.x, hit.y, hit.z);
+        interactCooldown = 0.3;
+      } else if (hitBlockType === BlockType.CHEST) {
+        openChest(hit.x, hit.y, hit.z);
+        interactCooldown = 0.3;
+      } else if (sel && isFood(sel.type)) {
         player.eat(FOOD_DATA[sel.type].restore);
         inventory.consume(inventory.selected, 1);
         interactCooldown = 0.25;
@@ -1012,7 +1575,7 @@ function loop(now) {
         const ny = hit.y + hit.face[1];
         const nz = hit.z + hit.face[2];
         if (!collidesWithPlayer(nx, ny, nz)) {
-          world.setVoxelWorld(nx, ny, nz, sel.type);
+          setWorldVoxel(nx, ny, nz, sel.type);
           inventory.consume(inventory.selected, 1);
           rebuildAround(nx, nz);
           interactCooldown = 0.25;
@@ -1028,10 +1591,19 @@ function loop(now) {
     if (mobDrops.length > 0) updateHUD();
 
     const mobDmg = mobManager.getMobAttackDamage(player.position);
-    if (mobDmg > 0) { player.takeDamage(mobDmg); updateHUD(); }
+    if (mobDmg > 0) {
+      const armor   = getArmorPoints();
+      const reduced = Math.max(1, Math.round(mobDmg * (1 - armor * 0.04)));
+      player.takeDamage(reduced);
+      updateHUD();
+    }
 
     // ── Overlay eau ───────────────────────────────────────────────────────────
     waterOverlay.style.display = player.inWater ? 'block' : 'none';
+
+    updateParticles(dt);
+    updateFurnaces(dt);
+    applyPendingWorldChanges();
 
     updateArm(dt);
     drawMinimap();
@@ -1045,7 +1617,7 @@ function loop(now) {
     const mm = Math.floor((totalH % 1) * 60);
     const mobCount = mobManager.mobs.length;
     debugEl.textContent = `pos: ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}  |  ${String(hh).padStart(2,'0')}h${String(mm).padStart(2,'0')}${mobCount > 0 ? `  |  mobs: ${mobCount}` : ''}`;
-  } else if (!inventoryOpen && gameStarted) {
+  } else if (!inventoryOpen && !furnaceOpen && !chestOpen && gameStarted) {
     overlay.style.display = 'flex';
   }
 
@@ -1053,6 +1625,12 @@ function loop(now) {
     charGroup.rotation.y += dt * 0.8;
     charRenderer.render(charScene, charCam);
     drawInventoryUI();
+  }
+
+  // ── Sauvegarde automatique (toutes les 60 s) ──────────────────────────────
+  if (gameStarted) {
+    autoSaveTimer -= dt;
+    if (autoSaveTimer <= 0) { autoSaveTimer = 60; saveGame(); }
   }
 
   renderer.render(scene, camera);
@@ -1087,7 +1665,7 @@ function explodeTNT(cx, cy, cz) {
         const wx = cx + dx, wy = cy + dy, wz = cz + dz;
         if (wy < 1 || wy >= CHUNK_HEIGHT) continue;
         if (world.getVoxelWorld(wx, wy, wz) !== BlockType.AIR) {
-          world.setVoxelWorld(wx, wy, wz, BlockType.AIR);
+          setWorldVoxel(wx, wy, wz, BlockType.AIR);
           const chX = Math.floor(wx / CHUNK_SIZE);
           const chZ = Math.floor(wz / CHUNK_SIZE);
           for (const [ox, oz] of [[0,0],[-1,0],[1,0],[0,-1],[0,1]])
@@ -1112,12 +1690,85 @@ function explodeTNT(cx, cy, cz) {
   player._damagedAt = performance.now() - 100;
 }
 
+// ── Sauvegarde / Chargement ────────────────────────────────────────────────────
+function saveGame() {
+  try {
+    const state = {
+      v: 2,
+      p: {
+        x: player.position.x, y: player.position.y, z: player.position.z,
+        yaw: player.yaw, pitch: player.pitch,
+        hp: player.health, hunger: player.hunger,
+      },
+      inv:  inventory.slots,
+      eq:   equipment,
+      tod:  timeOfDay,
+      wc:   [...worldChanges.entries()],
+      fn:   [...furnaces.entries()],
+      ch:   [...chests.entries()],
+    };
+    localStorage.setItem('threecraft_save', JSON.stringify(state));
+  } catch { /* quota exceeded or private mode */ }
+}
+
+function loadGame() {
+  const raw = localStorage.getItem('threecraft_save');
+  if (!raw) return false;
+  try {
+    const s = JSON.parse(raw);
+    if (!s || s.v < 2) return false;
+
+    player.position.set(s.p.x, s.p.y, s.p.z);
+    player.yaw   = s.p.yaw   ?? 0;
+    player.pitch = s.p.pitch ?? 0;
+    player.health = Math.max(1, s.p.hp   ?? 20);
+    player.hunger = Math.max(0, s.p.hunger ?? 20);
+
+    for (let i = 0; i < 36; i++) inventory.slots[i] = s.inv?.[i] ?? null;
+    Object.assign(equipment, s.eq ?? {});
+    timeOfDay = s.tod ?? 0.3;
+
+    // Queue world changes to apply as chunks load
+    worldChanges.clear();
+    for (const [key, type] of (s.wc ?? [])) {
+      worldChanges.set(key, type);
+      const [x, y, z] = key.split(',').map(Number);
+      pendingWorldChanges.push({ x, y, z, type });
+    }
+
+    furnaces.clear();
+    for (const [k, v] of (s.fn ?? [])) furnaces.set(k, v);
+
+    chests.clear();
+    for (const [k, v] of (s.ch ?? [])) chests.set(k, v.map(slot => slot || null));
+
+    return true;
+  } catch (e) {
+    console.warn('Échec du chargement :', e);
+    return false;
+  }
+}
+
 function collidesWithPlayer(bx, by, bz) {
   const p = player.position;
   const r = 0.3, h = 1.8;
   return bx + 1 > p.x - r && bx < p.x + r &&
          by + 1 > p.y      && by < p.y + h &&
          bz + 1 > p.z - r  && bz < p.z + r;
+}
+
+// ── Notification HUD temporaire ───────────────────────────────────────────────
+let _notifEl = null;
+function showNotification(msg) {
+  if (!_notifEl) {
+    _notifEl = document.createElement('div');
+    _notifEl.style.cssText = 'position:fixed;bottom:120px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.75);color:#fff;font:bold 14px monospace;padding:8px 18px;border-radius:4px;pointer-events:none;z-index:300;transition:opacity 0.5s;';
+    document.body.appendChild(_notifEl);
+  }
+  _notifEl.textContent = msg;
+  _notifEl.style.opacity = '1';
+  clearTimeout(_notifEl._t);
+  _notifEl._t = setTimeout(() => { _notifEl.style.opacity = '0'; }, 2500);
 }
 
 window.addEventListener('resize', () => {
